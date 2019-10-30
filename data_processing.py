@@ -292,10 +292,34 @@ def get_minorities(df,thresh=0.8):
     minorities = [c.keys()[x] for x,y in enumerate(lc) if y < (thresh*max_count)]
     return minorities,diffs
 
-def csv_from_path(path, img_dest):
+# def csv_from_path(path, img_dest):
+
+#     path = Path(path)
+#     img_dest = Path(img_dest)
+#     labels_paths = list(path.iterdir())
+#     tr_images = []
+#     tr_labels = []
+#     for l in labels_paths:
+#         if l.is_dir():
+#             for i in list(l.iterdir()):
+#                 if i.suffix in IMG_EXTENSIONS:
+#                     name = i.name
+#                     label = l.name
+#                     new_name = '{}_{}_{}'.format(path.name,label,name)
+#                     new_path = img_dest/new_name
+# #                     print(new_path)
+#                     os.rename(i,new_path)
+#                     tr_images.append(new_name)
+#                     tr_labels.append(label)
+#             # os.rmdir(l)
+#     tr_img_label = {'Img':tr_images, 'Label': tr_labels}
+#     csv = pd.DataFrame(tr_img_label,columns=['Img','Label'])
+#     csv = csv.sample(frac=1).reset_index(drop=True)
+#     return csv
+
+def csv_from_path(path):
 
     path = Path(path)
-    img_dest = Path(img_dest)
     labels_paths = list(path.iterdir())
     tr_images = []
     tr_labels = []
@@ -305,13 +329,11 @@ def csv_from_path(path, img_dest):
                 if i.suffix in IMG_EXTENSIONS:
                     name = i.name
                     label = l.name
-                    new_name = '{}_{}_{}'.format(path.name,label,name)
-                    new_path = img_dest/new_name
-#                     print(new_path)
-                    os.rename(i,new_path)
+                    new_name = '{}_{}'.format(path.name,name)
                     tr_images.append(new_name)
                     tr_labels.append(label)
-            # os.rmdir(l)
+    if len(tr_labels) == 0:
+        return None
     tr_img_label = {'Img':tr_images, 'Label': tr_labels}
     csv = pd.DataFrame(tr_img_label,columns=['Img','Label'])
     csv = csv.sample(frac=1).reset_index(drop=True)
@@ -424,11 +446,11 @@ class DataProcessor:
         img_names = [str(x) for x in list(train_df.iloc[:,0])]
         if self.extension:
             img_names = add_extension(img_names,self.extension)
-        if val_csv:
+        if val_csv is not None:
             val_csv_path = os.path.join(data_path,val_csv)
             val_df = pd.read_csv(val_csv_path)
             val_targets = list(val_df.iloc[:,1].apply(lambda x: str(x)))
-        if test_csv:
+        if test_csv is not None:
             test_csv_path = os.path.join(data_path,test_csv)
             test_df = pd.read_csv(test_csv_path)
             test_targets = list(test_df.iloc[:,1].apply(lambda x: str(x)))
@@ -538,21 +560,21 @@ class DataProcessor:
 
     def data_from_paths_to_csv(self,data_path,tr_path,val_path = None,test_path = None):
             
-        train_df = csv_from_path(tr_path,tr_path)
+        train_df = csv_from_path(tr_path)
         train_df.to_csv(os.path.join(data_path,self.tr_name+'.csv'),index=False)
         ret = (self.tr_name+'.csv',None,None)
         if val_path is not None:
-            val_exists = os.path.exists(val_path)
-            if val_exists:
-                val_df = csv_from_path(val_path,tr_path)
-                val_df.to_csv(os.path.join(data_path,self.val_name+'.csv'),index=False)
-                ret = (self.tr_name+'.csv',self.val_name+'.csv',None)
+            if os.path.exists(val_path):
+                val_df = csv_from_path(val_path)
+                if val_df is not None:
+                    val_df.to_csv(os.path.join(data_path,self.val_name+'.csv'),index=False)
+                    ret = (self.tr_name+'.csv',self.val_name+'.csv',None)
         if test_path is not None:
-            test_exists = os.path.exists(test_path)
-            if test_exists:
-                test_df = csv_from_path(test_path,tr_path)
-                test_df.to_csv(os.path.join(data_path,self.test_name+'.csv'),index=False)
-                ret = (self.tr_name+'.csv',self.val_name+'.csv',self.test_name+'.csv')        
+            if os.path.exists(test_path):
+                test_df = csv_from_path(test_path)
+                if test_df is not None:
+                    test_df.to_csv(os.path.join(data_path,self.test_name+'.csv'),index=False)
+                    ret = (self.tr_name+'.csv',self.val_name+'.csv',self.test_name+'.csv')        
         return ret
         
     def get_data(self, data_dict = None, s = (224,224), dataset = dai_image_csv_dataset, train_resize_transform = None, val_resize_transform = None, 

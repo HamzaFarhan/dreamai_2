@@ -292,31 +292,6 @@ def get_minorities(df,thresh=0.8):
     minorities = [c.keys()[x] for x,y in enumerate(lc) if y < (thresh*max_count)]
     return minorities,diffs
 
-# def csv_from_path(path, img_dest):
-
-#     path = Path(path)
-#     img_dest = Path(img_dest)
-#     labels_paths = list(path.iterdir())
-#     tr_images = []
-#     tr_labels = []
-#     for l in labels_paths:
-#         if l.is_dir():
-#             for i in list(l.iterdir()):
-#                 if i.suffix in IMG_EXTENSIONS:
-#                     name = i.name
-#                     label = l.name
-#                     new_name = '{}_{}_{}'.format(path.name,label,name)
-#                     new_path = img_dest/new_name
-# #                     print(new_path)
-#                     os.rename(i,new_path)
-#                     tr_images.append(new_name)
-#                     tr_labels.append(label)
-#             # os.rmdir(l)
-#     tr_img_label = {'Img':tr_images, 'Label': tr_labels}
-#     csv = pd.DataFrame(tr_img_label,columns=['Img','Label'])
-#     csv = csv.sample(frac=1).reset_index(drop=True)
-#     return csv
-
 def csv_from_path(path):
 
     path = Path(path)
@@ -329,7 +304,7 @@ def csv_from_path(path):
                 if i.suffix in IMG_EXTENSIONS:
                     name = i.name
                     label = l.name
-                    new_name = '{}_{}'.format(path.name,name)
+                    new_name = f'{path.name}/{name}'
                     tr_images.append(new_name)
                     tr_labels.append(label)
     if len(tr_labels) == 0:
@@ -422,22 +397,22 @@ class DataProcessor:
         
         if not data_path:
             data_path = os.getcwd() + '/'
+            self.data_dir = data_path
         tr_path = os.path.join(data_path,tr_name)
         val_path = os.path.join(data_path,val_name)
         test_path = os.path.join(data_path,test_name)
         os.makedirs('mlflow_saved_training_models',exist_ok=True)
-        if (os.path.exists(os.path.join(data_path,tr_name+'.csv'))) and train_csv is None:
-            train_csv = tr_name+'.csv'
-        # if os.path.exists(os.path.join(data_path,val_name+'.csv')):
-        #     val_csv = val_name+'.csv'
-        # if os.path.exists(os.path.join(data_path,test_name+'.csv')):
-        #     test_csv = test_name+'.csv'    
-
-        # paths to csv
-
-        if not train_csv:
-            # print('no')
-            train_csv,val_csv,test_csv = self.data_from_paths_to_csv(data_path,tr_path,val_path,test_path)
+        if train_csv is None:
+            if (os.path.exists(os.path.join(data_path,tr_name+'.csv'))):
+                train_csv = tr_name+'.csv'
+                if os.path.exists(os.path.join(data_path,val_name+'.csv')):
+                    val_csv = val_name+'.csv'
+                if os.path.exists(os.path.join(data_path,test_name+'.csv')):
+                    test_csv = test_name+'.csv'
+            else:
+                train_csv,val_csv,test_csv = self.data_from_paths_to_csv(data_path,tr_path,val_path,test_path)
+        else:
+            self.data_dir = tr_path
 
         train_csv_path = os.path.join(data_path,train_csv)
         train_df = pd.read_csv(train_csv_path)
@@ -475,7 +450,7 @@ class DataProcessor:
                     pass
                 dai_onehot,onehot_classes = one_hot(split_targets,multi=True)
                 train_df_multi.iloc[:,1] = [torch.from_numpy(x).type(torch.FloatTensor) for x in dai_onehot]
-                self.data_dir,self.num_multi_classes,self.multi_class_names = data_path,len(onehot_classes),onehot_classes
+                self.num_multi_classes,self.multi_class_names = len(onehot_classes),onehot_classes
 
                 targets = list(train_df_single.iloc[:,1].apply(lambda x: str(x)))
                 lengths = [len(t) for t in [s.split() for s in targets]]
@@ -504,7 +479,7 @@ class DataProcessor:
                     pass
                 dai_onehot,onehot_classes = one_hot(split_targets,self.multi_label)
                 train_df.iloc[:,1] = [torch.from_numpy(x).type(torch.FloatTensor) for x in dai_onehot]
-                self.data_dir,self.num_classes,self.class_names = data_path,len(onehot_classes),onehot_classes
+                self.num_classes,self.class_names = len(onehot_classes),onehot_classes
 
             else:
                 print('\nSingle-label Classification\n')
@@ -524,7 +499,7 @@ class DataProcessor:
                     val_df.iloc[:,1] = pd.Series(val_targets).apply(lambda x: unique_targets_dict[x])
                 if test_csv:
                     test_df.iloc[:,1] = pd.Series(test_targets).apply(lambda x: unique_targets_dict[x])   
-                self.data_dir,self.num_classes,self.class_names = data_path,len(unique_targets),unique_targets
+                self.num_classes,self.class_names = len(unique_targets),unique_targets
 
         if not val_csv:
             train_df,val_df = split_df(train_df,split_size)
@@ -543,6 +518,9 @@ class DataProcessor:
         if self.single_label:
             dai_df = pd.concat([train_df,val_df,test_df]).reset_index(drop=True,inplace=False)
             dai_df.iloc[:,1] = [self.class_names[x] for x in dai_df.iloc[:,1]]
+            train_df.iloc[:,1] = [self.class_names[x] for x in train_df.iloc[:,1]]
+            val_df.iloc[:,1] = [self.class_names[x] for x in val_df.iloc[:,1]]
+            test_df.iloc[:,1] = [self.class_names[x] for x in test_df.iloc[:,1]]
             dai_df.to_csv(os.path.join(data_path,'dai_df.csv'),index=False)
         train_df.to_csv(os.path.join(data_path,'{}.csv'.format(self.tr_name)),index=False)
         val_df.to_csv(os.path.join(data_path,'{}.csv'.format(self.val_name)),index=False)
@@ -603,7 +581,7 @@ class DataProcessor:
         if img_mean is None and self.img_mean is None:
             # temp_tfms = [resize_transform, transforms.ToTensor()]
             temp_tfms = [train_resize_transform, AT.ToTensor()]
-            temp_dataset = dai_image_csv_dataset(data_dir = os.path.join(data_dir,self.tr_name),data = data_dfs[self.tr_name],
+            temp_dataset = dai_image_csv_dataset(data_dir = data_dir,data = data_dfs[self.tr_name],
                                    transforms_ = temp_tfms,channels = channels)
             self.img_mean,self.img_std = get_img_stats(temp_dataset,stats_percentage,channels)
         elif self.img_mean is None:
@@ -619,7 +597,7 @@ class DataProcessor:
                 self.test_name: val_test_tfms
             }
             has_difficult = (len(data_dfs[self.tr_name].columns) == 4)
-            image_datasets = {x: dataset(data_dir = os.path.join(data_dir,self.tr_name),data = data_dfs[x],tfms = data_transforms[x],
+            image_datasets = {x: dataset(data_dir = data_dir,data = data_dfs[x],tfms = data_transforms[x],
                                 has_difficult = has_difficult)
                               for x in [self.tr_name, self.val_name, self.test_name]}
             dataloaders = {x: DataLoader(image_datasets[x], batch_size=bs,collate_fn=image_datasets[x].collate_fn,
@@ -675,17 +653,17 @@ class DataProcessor:
             }
 
             if balance:
-                image_datasets = {x: dataset(data_dir = os.path.join(data_dir,self.tr_name),data = data_dfs[x],
+                image_datasets = {x: dataset(data_dir = data_dir,data = data_dfs[x],
                                             transforms_ = data_transforms[x],minorities = minorities,diffs = class_diffs,
                                             bal_tfms = bal_tfms[x],channels = channels,seg = seg)
                             for x in [self.tr_name, self.val_name, self.test_name]}    
             elif self.multi_head:
                 dataset = dai_image_csv_dataset_multi_head
-                image_datasets = {x: dataset(data_dir = os.path.join(data_dir,self.tr_name),data = data_dfs[x],
+                image_datasets = {x: dataset(data_dir = data_dir,data = data_dfs[x],
                                             transforms_ = data_transforms[x],channels = channels)
                             for x in [self.tr_name, self.val_name, self.test_name]}
             else:
-                image_datasets = {x: dataset(data_dir = os.path.join(data_dir,self.tr_name),data = data_dfs[x],
+                image_datasets = {x: dataset(data_dir = data_dir,data = data_dfs[x],
                                             transforms_ = data_transforms[x],channels = channels,seg = seg)
                             for x in [self.tr_name, self.val_name, self.test_name]}
             

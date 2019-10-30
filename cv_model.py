@@ -1755,16 +1755,16 @@ class TransferNetworkImg(Network):
         self.backbone = None
         models_dict = {
 
-            'densenet': {'model':densenet121(pretrained=pretrained),'conv_channels':1024},
-            'resnet34': {'model':resnet34(pretrained=pretrained),'conv_channels':512},
-            'resnet50': {'model':resnet50(pretrained=pretrained),'conv_channels':2048},
-            'resnext50': {'model':resnext50_32x4d(pretrained=pretrained),'conv_channels':2048},
-            'resnext101': {'model':resnext101_32x8d(pretrained=pretrained),'conv_channels':2048}
+            'densenet': {'model':densenet121,'conv_channels':1024},
+            'resnet34': {'model':resnet34,'conv_channels':512},
+            'resnet50': {'model':resnet50,'conv_channels':2048},
+            'resnext50': {'model':resnext50_32x4d,'conv_channels':2048},
+            'resnext101': {'model':resnext101_32x8d,'conv_channels':2048}
 
         }
         meta = models_dict[mname.lower()]
         try:
-            model = meta['model']
+            model = meta['model'](pretrained=pretrained)
             for param in model.parameters():
                 param.requires_grad = False
             self.backbone = model    

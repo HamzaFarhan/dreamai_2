@@ -521,7 +521,7 @@ class DataProcessor:
             train_df.iloc[:,1] = [self.class_names[x] for x in train_df.iloc[:,1]]
             val_df.iloc[:,1] = [self.class_names[x] for x in val_df.iloc[:,1]]
             test_df.iloc[:,1] = [self.class_names[x] for x in test_df.iloc[:,1]]
-            dai_df.to_csv(os.path.join(data_path,'dai_df.csv'),index=False)
+            dai_df.to_csv(os.path.join(data_path,'dai_processed_df.csv'),index=False)
         train_df.to_csv(os.path.join(data_path,'{}.csv'.format(self.tr_name)),index=False)
         val_df.to_csv(os.path.join(data_path,'{}.csv'.format(self.val_name)),index=False)
         test_df.to_csv(os.path.join(data_path,'{}.csv'.format(self.test_name)),index=False)

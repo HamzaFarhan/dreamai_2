@@ -304,7 +304,7 @@ def csv_from_path(path):
                 if i.suffix in IMG_EXTENSIONS:
                     name = i.name
                     label = l.name
-                    new_name = f'{path.name}/{name}'
+                    new_name = f'{path.name}/{label}/{name}'
                     tr_images.append(new_name)
                     tr_labels.append(label)
     if len(tr_labels) == 0:

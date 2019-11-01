@@ -486,8 +486,10 @@ class DataProcessor:
                 dai_onehot,onehot_classes = one_hot(split_targets,self.multi_label)
                 train_df_concat.iloc[:,1] = [torch.from_numpy(x).type(torch.FloatTensor) for x in dai_onehot]
                 train_df = train_df_concat.loc[:len(train_df)-1].copy()
-                val_df = train_df_concat.loc[len(train_df):len(train_df)+len(val_df)-1].copy().reset_index(drop=True)
-                test_df = train_df_concat.loc[len(val_df)+len(train_df):len(val_df)+len(train_df)+len(test_df)-1].copy().reset_index(drop=True)
+                if val_csv:
+                    val_df = train_df_concat.loc[len(train_df):len(train_df)+len(val_df)-1].copy().reset_index(drop=True)
+                if test_csv:
+                    test_df = train_df_concat.loc[len(val_df)+len(train_df):len(val_df)+len(train_df)+len(test_df)-1].copy().reset_index(drop=True)
                 self.num_classes,self.class_names = len(onehot_classes),onehot_classes
 
                 # train_df.fillna('',inplace=True)

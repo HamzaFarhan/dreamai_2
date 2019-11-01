@@ -34,7 +34,7 @@ import pandas as pd
 from tqdm import tqdm
 from math import sqrt
 import mlflow.pytorch
-import face_recognition
+# import face_recognition
 from scipy import stats
 from pathlib import Path
 from ast import literal_eval

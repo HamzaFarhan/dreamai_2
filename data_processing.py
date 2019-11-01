@@ -469,8 +469,14 @@ class DataProcessor:
             elif self.multi_label:
                 print('\nMulti-label Classification\n')
 
-                train_df.fillna('',inplace=True)
-                targets = list(train_df.iloc[:,1].apply(lambda x: str(x)))
+                train_df_concat = train_df.copy()
+                if val_csv:
+                    train_df_concat  = pd.concat([train_df_concat,val_df]).reset_index(drop=True,inplace=False)
+                if test_csv:
+                    train_df_concat  = pd.concat([train_df_concat,test_df]).reset_index(drop=True,inplace=False)
+
+                train_df_concat.fillna('',inplace=True)
+                targets = list(train_df_concat.iloc[:,1].apply(lambda x: str(x)))
                 lengths = [len(t) for t in [s.split() for s in targets]]
                 split_targets = [t.split() for t in targets]
                 try:
@@ -478,8 +484,22 @@ class DataProcessor:
                 except:
                     pass
                 dai_onehot,onehot_classes = one_hot(split_targets,self.multi_label)
-                train_df.iloc[:,1] = [torch.from_numpy(x).type(torch.FloatTensor) for x in dai_onehot]
+                train_df_concat.iloc[:,1] = [torch.from_numpy(x).type(torch.FloatTensor) for x in dai_onehot]
+                train_df = train_df_concat.loc[:len(train_df)-1].copy()
+                val_df = train_df_concat.loc[len(train_df):len(train_df)+len(val_df)-1].copy().reset_index(drop=True)
+                test_df = train_df_concat.loc[len(val_df):len(val_df)+len(test_df)-1].copy().reset_index(drop=True)
                 self.num_classes,self.class_names = len(onehot_classes),onehot_classes
+
+                # train_df.fillna('',inplace=True)
+                # targets = list(train_df.iloc[:,1].apply(lambda x: str(x)))
+                # lengths = [len(t) for t in [s.split() for s in targets]]
+                # split_targets = [t.split() for t in targets]
+                # try:
+                #     split_targets = [list(map(int,x)) for x in split_targets]
+                # except:
+                #     pass
+                # dai_onehot,onehot_classes = one_hot(split_targets,self.multi_label)
+                # train_df.iloc[:,1] = [torch.from_numpy(x).type(torch.FloatTensor) for x in dai_onehot]
 
             else:
                 print('\nSingle-label Classification\n')

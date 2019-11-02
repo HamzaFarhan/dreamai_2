@@ -561,20 +561,20 @@ class DataProcessor:
     def data_from_paths_to_csv(self,data_path,tr_path,val_path = None,test_path = None):
             
         train_df = csv_from_path(tr_path)
-        # train_df.to_csv(os.path.join(data_path,self.tr_name+'.csv'),index=False)
-        ret = (self.tr_name+'.csv',None,None)
+        train_df.to_csv(os.path.join(data_path,f'dai_{self.tr_name}.csv'),index=False)
+        ret = (f'dai_{self.tr_name}.csv',None,None)
         if val_path is not None:
             if os.path.exists(val_path):
                 val_df = csv_from_path(val_path)
                 if val_df is not None:
-                    # val_df.to_csv(os.path.join(data_path,self.val_name+'.csv'),index=False)
-                    ret = (self.tr_name+'.csv',self.val_name+'.csv',None)
+                    val_df.to_csv(os.path.join(data_path,f'dai_{self.val_name}.csv'),index=False)
+                    ret = (f'dai_{self.tr_name}.csv',f'dai_{self.val_name}.csv',None)
         if test_path is not None:
             if os.path.exists(test_path):
                 test_df = csv_from_path(test_path)
                 if test_df is not None:
-                    # test_df.to_csv(os.path.join(data_path,self.test_name+'.csv'),index=False)
-                    ret = (self.tr_name+'.csv',self.val_name+'.csv',self.test_name+'.csv')        
+                    test_df.to_csv(os.path.join(data_path,f'dai_{self.test_name}.csv'),index=False)
+                    ret = (f'dai_{self.tr_name}.csv',f'dai_{self.val_name}.csv',f'dai_{self.test_name}.csv')        
         return ret
         
     def get_data(self, data_dict = None, s = (224,224), dataset = dai_image_csv_dataset, train_resize_transform = None, val_resize_transform = None, 

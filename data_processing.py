@@ -403,14 +403,14 @@ class DataProcessor:
         test_path = os.path.join(data_path,test_name)
         os.makedirs('mlflow_saved_training_models',exist_ok=True)
         if train_csv is None:
-            if (os.path.exists(os.path.join(data_path,tr_name+'.csv'))):
-                train_csv = tr_name+'.csv'
-                if os.path.exists(os.path.join(data_path,val_name+'.csv')):
-                    val_csv = val_name+'.csv'
-                if os.path.exists(os.path.join(data_path,test_name+'.csv')):
-                    test_csv = test_name+'.csv'
-            else:
-                train_csv,val_csv,test_csv = self.data_from_paths_to_csv(data_path,tr_path,val_path,test_path)
+            # if (os.path.exists(os.path.join(data_path,tr_name+'.csv'))):
+            #     train_csv = tr_name+'.csv'
+            #     if os.path.exists(os.path.join(data_path,val_name+'.csv')):
+            #         val_csv = val_name+'.csv'
+            #     if os.path.exists(os.path.join(data_path,test_name+'.csv')):
+            #         test_csv = test_name+'.csv'
+            # else:
+            train_csv,val_csv,test_csv = self.data_from_paths_to_csv(data_path,tr_path,val_path,test_path)
         else:
             self.data_dir = tr_path
 
@@ -540,13 +540,13 @@ class DataProcessor:
         if self.single_label:
             dai_df = pd.concat([train_df,val_df,test_df]).reset_index(drop=True,inplace=False)
             dai_df.iloc[:,1] = [self.class_names[x] for x in dai_df.iloc[:,1]]
-            train_df.iloc[:,1] = [self.class_names[x] for x in train_df.iloc[:,1]]
-            val_df.iloc[:,1] = [self.class_names[x] for x in val_df.iloc[:,1]]
-            test_df.iloc[:,1] = [self.class_names[x] for x in test_df.iloc[:,1]]
+            # train_df.iloc[:,1] = [self.class_names[x] for x in train_df.iloc[:,1]]
+            # val_df.iloc[:,1] = [self.class_names[x] for x in val_df.iloc[:,1]]
+            # test_df.iloc[:,1] = [self.class_names[x] for x in test_df.iloc[:,1]]
             dai_df.to_csv(os.path.join(data_path,'dai_processed_df.csv'),index=False)
-        train_df.to_csv(os.path.join(data_path,'{}.csv'.format(self.tr_name)),index=False)
-        val_df.to_csv(os.path.join(data_path,'{}.csv'.format(self.val_name)),index=False)
-        test_df.to_csv(os.path.join(data_path,'{}.csv'.format(self.test_name)),index=False)
+        # train_df.to_csv(os.path.join(data_path,'{}.csv'.format(self.tr_name)),index=False)
+        # val_df.to_csv(os.path.join(data_path,'{}.csv'.format(self.val_name)),index=False)
+        # test_df.to_csv(os.path.join(data_path,'{}.csv'.format(self.test_name)),index=False)
         self.minorities,self.class_diffs = None,None
         if self.single_label:
             self.minorities,self.class_diffs = get_minorities(train_df)
@@ -561,19 +561,19 @@ class DataProcessor:
     def data_from_paths_to_csv(self,data_path,tr_path,val_path = None,test_path = None):
             
         train_df = csv_from_path(tr_path)
-        train_df.to_csv(os.path.join(data_path,self.tr_name+'.csv'),index=False)
+        # train_df.to_csv(os.path.join(data_path,self.tr_name+'.csv'),index=False)
         ret = (self.tr_name+'.csv',None,None)
         if val_path is not None:
             if os.path.exists(val_path):
                 val_df = csv_from_path(val_path)
                 if val_df is not None:
-                    val_df.to_csv(os.path.join(data_path,self.val_name+'.csv'),index=False)
+                    # val_df.to_csv(os.path.join(data_path,self.val_name+'.csv'),index=False)
                     ret = (self.tr_name+'.csv',self.val_name+'.csv',None)
         if test_path is not None:
             if os.path.exists(test_path):
                 test_df = csv_from_path(test_path)
                 if test_df is not None:
-                    test_df.to_csv(os.path.join(data_path,self.test_name+'.csv'),index=False)
+                    # test_df.to_csv(os.path.join(data_path,self.test_name+'.csv'),index=False)
                     ret = (self.tr_name+'.csv',self.val_name+'.csv',self.test_name+'.csv')        
         return ret
         

@@ -113,7 +113,7 @@ class Network(nn.Module):
         loss = self.compute_loss(outputs,labels)[0]
         return loss
 
-    def fit(self,trainloader,validloader,epochs=2,print_every=10,validate_every=1,save_best_every=1,clip=False,load_best=True,
+    def fit(self,trainloader,validloader,epochs=2,print_every=10,validate_every=1,save_best_every=1,clip=False,load_best=False,
             eval_thresh=0.5,saving_crit='loss'):
 
         optim_path = Path(self.best_model_file)

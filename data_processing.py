@@ -327,21 +327,14 @@ def one_hot(targets, multi = False):
         dai_1hot = binerizer.fit_transform(targets)
     return dai_1hot,binerizer.classes_
 
-def get_img_stats(dataset,sz,channels):
+def get_img_stats(dataset,channels):
 
     print('Calculating mean and std of the data for standardization. Might take some time, depending on the training data size.')
 
-    size = int(len(dataset)*sz)
-    i = 0
     imgs = []
     for d in dataset:
         img = d[0]
-        # print(img.shape)
-        # print(img.size())
-        if i > size:
-            break
         imgs.append(img)
-        i+=1
     imgs_ = torch.stack(imgs,dim=3)
     imgs_ = imgs_.view(channels,-1)
     imgs_mean = imgs_.mean(dim=1)
@@ -603,9 +596,9 @@ class DataProcessor:
         if img_mean is None and self.img_mean is None:
             # temp_tfms = [resize_transform, transforms.ToTensor()]
             temp_tfms = [train_resize_transform, AT.ToTensor()]
-            temp_dataset = dai_image_csv_dataset(data_dir = data_dir,data = data_dfs[self.tr_name],
-                                   transforms_ = temp_tfms,channels = channels)
-            self.img_mean,self.img_std = get_img_stats(temp_dataset,stats_percentage,channels)
+            frac_data = data_dfs[self.tr_name].sample(frac = stats_percentage).reset_index(drop=True).copy()
+            temp_dataset = dai_image_csv_dataset(data_dir = data_dir,data = frac_data,transforms_ = temp_tfms,channels = channels)
+            self.img_mean,self.img_std = get_img_stats(temp_dataset,channels)
         elif self.img_mean is None:
             self.img_mean,self.img_std = img_mean,img_std
         if obj:

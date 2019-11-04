@@ -1,4 +1,5 @@
 from dai_imports import*
+from data_processing import get_img_stats
 
 def display_img_actual_size(im_data,title = ''):
     dpi = 80
@@ -80,43 +81,110 @@ def smooth_labels(labels,eps=0.1):
     labels = labels * (1 - eps) + (1-labels) * eps / (length - 1)
     return labels
 
-def imgs_to_batch(paths = [],imgs = [], size = None, smaller_factor = None, enlarge_factor = None,
-                  show = False, norm = False, bgr_to_rgb = False, device = None):
-    if len(paths) > 0:
-        bgr_to_rgb = True
-        imgs = []
-        for p in paths:
-            imgs.append(cv2.imread(str(p)))
-    for i,img in enumerate(imgs):
-        if size is None:
-            if smaller_factor:
-                size = (img.shape[1]//smaller_factor,img.shape[0]//smaller_factor)
-            elif enlarge_factor:
-                size = (int(img.shape[1]*enlarge_factor),int(img.shape[0]*enlarge_factor))
-        if size:
-            # if (img.shape[0] < size[1]) or (img.shape[1] < size[0]):
-            #     inter = cv2.INTER_CUBIC
-            # else:
-            #     inter = cv2.INTER_AREA
-            # img = cv2.resize(img, size,interpolation=inter)
-            img = cv2.resize(img, size)
-        if bgr_to_rgb:
-            img = bgr2rgb(img)
-        if show:
-            try:
-                plt_show(img)   
-            except:
-                plt_show(img.squeeze(2))
-        if len(img.shape) < 3:
-            img = img[...,None]        
-        img_ =  img.transpose((2,0,1)) # H X W C -> C X H X W
-        if norm:
-            img_ = (img_ - np.mean(img_))/np.std(img_)
-        imgs[i] = img_/255.
-    batch = torch.from_numpy(np.asarray(imgs)).float() 
-    if device is not None:
-        batch = batch.to(device)
-    return batch
+# def get_img_stats(dataset,tfms,channels,sz=1.):
+
+#     print('Calculating mean and std of the data for standardization. Might take some time, depending on the data size.')
+
+#     size = int(len(dataset)*sz)
+#     imgs = []
+#     for i,img in enumerate(dataset):
+#         if i > size:
+#             break
+#         img = tfms(image=img)['image']
+#         if channels == 1:
+#             img.unsqueeze_(0)
+#         imgs.append(img)
+#     imgs_ = torch.stack(imgs,dim=3)
+#     imgs_ = imgs_.view(channels,-1)
+#     imgs_mean = imgs_.mean(dim=1)
+#     imgs_std = imgs_.std(dim=1)
+#     del imgs
+#     del imgs_
+#     print('Done')
+#     return imgs_mean,imgs_std
+
+class imgs_to_batch_dataset(Dataset):
+    
+    def __init__(self, data, transforms_ = None, channels = 3):
+        super(imgs_to_batch_dataset, self).__init__()
+        self.data = data
+        self.transforms_ = transforms_
+        self.tfms = None
+        self.channels = channels
+        assert transforms_ is not None, print('Please pass some transforms.')
+        
+    def __len__(self):
+        return len(self.data)
+    
+    def __getitem__(self, index):
+        img_path = self.data.iloc[index, 0]
+        if self.channels == 3:
+            img = utils.bgr2rgb(cv2.imread(str(img_path)))
+        else:    
+            img = cv2.imread(str(img_path),0)
+        self.tfms = albu.Compose(self.transforms_)
+        x = self.tfms(image=img)['image']
+        if self.channels == 1:
+            x = x.unsqueeze(0)
+        return x,img_path
+
+def imgs_to_batch(data, bs, size = None, norm = False, img_mean = None, img_std = None, stats_percentage = 1., channels = 3, num_workers = 6):
+    tfms = [AT.ToTensor()]
+    if size:
+        tfms.insert(0,albu.Resize(size[0],size[1],interpolation=0))        
+    if norm:
+        if img_mean is None:
+            norm_tfms = albu.Compose(tfms)
+            frac_data = data.sample(frac = stats_percentage).reset_index(drop=True).copy()
+            temp_dataset = imgs_to_batch_dataset(data = frac_data, transforms_ = norm_tfms, channels = channels)
+            img_mean,img_std = get_img_stats(temp_dataset,channels)
+        tfms.insert(1,albu.Normalize(img_mean,img_std))
+    tfms = albu.Compose(tfms)
+    image_dataset = imgs_to_batch_dataset(data = data, transforms_ = tfms, channels = channels)
+    loader = DataLoader(image_dataset, batch_size = bs, shuffle=True, num_workers = num_workers)
+    return image_dataset,loader
+
+# def imgs_to_batch_old(paths = [],imgs = [], size = None, smaller_factor = None, enlarge_factor = None, mean = None, std = None,
+#                   stats_percentage = 1.,show = False, norm = False, bgr_to_rgb = False, device = None, channels = 3):
+#     tfms = [AT.ToTensor()]    
+#     if len(paths) > 0:
+#         if channels == 3:
+#             bgr_to_rgb = True
+#             imgs = []
+#             for p in paths:
+#                 imgs.append(cv2.imread(str(p)))
+#         elif channels == 1:
+#             imgs = []
+#             for p in paths:
+#                 imgs.append(cv2.imread(str(p),0))
+#     if size:
+#         tfms.insert(0,albu.Resize(size[0],size[1],interpolation=0))        
+#     if norm:
+#         norm_tfms = albu.Compose(tfms)
+#         if mean is None:
+#             mean,std = get_img_stats(imgs,norm_tfms,channels,stats_percentage)
+#         tfms.insert(1,albu.Normalize(mean,std))
+#     for i,img in enumerate(imgs):
+#         if bgr_to_rgb:
+#             img = bgr2rgb(img)
+#         if show:
+#             cmap = None
+#             if channels == 1:
+#                 cmap = 'gray'
+#             try:
+#                 plt_show(img,cmap=cmap)   
+#             except:
+#                 plt_show(img,cmap=cmap)
+        
+#         transform = albu.Compose(tfms)
+#         x = transform(image=img)['image']
+#         if channels == 1:
+#             x.unsqueeze_(0)
+#         imgs[i] = x
+#     batch = torch.stack(imgs, dim=0)
+#     if device is not None:
+#         batch = batch.to(device)
+#     return batch
 
 def to_batch(paths = [],imgs = [], size = None):
     if len(paths) > 0:

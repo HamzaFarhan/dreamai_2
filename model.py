@@ -113,76 +113,69 @@ class Network(nn.Module):
         loss = self.compute_loss(outputs,labels)[0]
         return loss
 
-    def fit(self,trainloader,validloader,epochs=2,print_every=10,validate_every=1,save_best_every=1,clip=False,load_best=False,
-            eval_thresh=0.5,saving_crit='loss'):
-
+    def fit(self,trainloader,validloader,cycle_len=2,num_cycles=1,print_every=10,validate_every=1,save_best_every=1,clip=False,load_best=False,
+            eval_thresh=0.5,saving_crit='loss',one_cycle_upward_epochs=None):
+        epochs = cycle_len
         optim_path = Path(self.best_model_file)
         optim_path = optim_path.stem + '_optim' + optim_path.suffix
+        lr = self.optimizer.param_groups[0]['lr']
+        if one_cycle_upward_epochs is not None:
+            max_lr = min(1.,lr*10)
+            start_lr = lr/100
+            last_lr = lr/1000
+            upward_epochs = one_cycle_upward_epochs
+            remaining_epochs = epochs-upward_epochs
+            max_epochs = int(np.ceil(remaining_epochs/4))
+            downward_epochs = int(np.floor(remaining_epochs/2))
+            last_epochs = int(np.ceil(remaining_epochs/4))
+            upward_step = (max_lr-start_lr)/upward_epochs
+            downward_step = -((max_lr-last_lr)/downward_epochs)
+            upward_lrs = list(np.arange(start_lr,max_lr,step=upward_step))
+            downward_lrs = list(np.arange(max_lr,last_lr,step=downward_step))
+            lrs = upward_lrs + [max_lr]*max_epochs + downward_lrs + [last_lr]*last_epochs
+            if len(lrs) < epochs:
+                lrs += [last_lr]*(epochs-len(lrs))
         with mlflow.start_run() as run:
-            for epoch in range(epochs):
-                self.model = self.model.to(self.device)
-                mlflow.log_param('epochs',epochs)
-                mlflow.log_param('lr',self.optimizer.param_groups[0]['lr'])
-                mlflow.log_param('bs',trainloader.batch_size)
-                print('Epoch:{:3d}/{}\n'.format(epoch+1,epochs))
-                epoch_train_loss =  self.train_((epoch,epochs),trainloader,self.optimizer,print_every,clip=clip)  
+            for cycle in range(num_cycles):
+                for epoch in range(epochs):
+                    print(f'Cycle: {cycle+1}/{num_cycles}')
+                    print('Epoch:{:3d}/{}\n'.format(epoch+1,epochs))
+                    print(f'Learning Rate: {lrs[epoch]}')
+                    if one_cycle_upward_epochs is not None:
+                        self.optimizer.param_groups[0]['lr'] = lrs[epoch]
+                    self.model = self.model.to(self.device)
+                    mlflow.log_param('epochs',epochs)
+                    mlflow.log_param('lr',self.optimizer.param_groups[0]['lr'])
+                    mlflow.log_param('bs',trainloader.batch_size)
+                    epoch_train_loss =  self.train_((epoch,epochs),trainloader,self.optimizer,print_every,clip=clip)  
+                            
+                    if  validate_every and (epoch % validate_every == 0):
+                        t2 = time.time()
+                        eval_dict = self.evaluate(validloader,thresh=eval_thresh)
+                        epoch_validation_loss = eval_dict['final_loss']
+                        if self.parallel:
+                            try:
+                                epoch_train_loss = epoch_train_loss.item()
+                                epoch_validation_loss = epoch_validation_loss.item()
+                            except:
+                                pass  
+                        mlflow.log_metric('Train Loss',epoch_train_loss)
+                        mlflow.log_metric('Validation Loss',epoch_validation_loss)
                         
-                if  validate_every and (epoch % validate_every == 0):
-                    t2 = time.time()
-                    eval_dict = self.evaluate(validloader,thresh=eval_thresh)
-                    epoch_validation_loss = eval_dict['final_loss']
-                    if self.parallel:
-                        try:
-                            epoch_train_loss = epoch_train_loss.item()
-                            epoch_validation_loss = epoch_validation_loss.item()
-                        except:
-                            pass  
-                    mlflow.log_metric('Train Loss',epoch_train_loss)
-                    mlflow.log_metric('Validation Loss',epoch_validation_loss)
-                    
-                    time_elapsed = time.time() - t2
-                    if time_elapsed > 60:
-                        time_elapsed /= 60.
-                        measure = 'min'
-                    else:
-                        measure = 'sec'    
-                    print('\n'+'/'*36+'\n'
-                            f"{time.asctime().split()[-2]}\n"
-                            f"Epoch {epoch+1}/{epochs}\n"    
-                            f"Validation time: {time_elapsed:.6f} {measure}\n"    
-                            f"Epoch training loss: {epoch_train_loss:.6f}\n"                        
-                            f"Epoch validation loss: {epoch_validation_loss:.6f}"
-                        )
-                    if self.model_type == 'classifier':# or self.num_classes is not None:
-                        epoch_accuracy = eval_dict['accuracy']
-                        mlflow.log_metric('Validation Accuracy',epoch_accuracy)
-                        print("Validation accuracy: {:.3f}".format(epoch_accuracy))
-                        print()
-                        if self.num_classes <= 5:
-                            class_acc = eval_dict['class_accuracies']
-                            for cl,ac in class_acc:
-                                print(f'{cl} accuracy: {ac:.4f}')
-                        # print('\\'*36+'/'*36+'\n')
-                        print('\\'*36+'\n')
-                        if self.best_accuracy == 0. or (epoch_accuracy >= self.best_accuracy):
-                            print('\n**********Updating best accuracy**********\n')
-                            print('Previous best: {:.3f}'.format(self.best_accuracy))
-                            print('New best: {:.3f}\n'.format(epoch_accuracy))
-                            print('******************************************\n')
-                            self.best_accuracy = epoch_accuracy
-                            mlflow.log_metric('Best Accuracy',self.best_accuracy)
-                            optim_path = Path(self.best_model_file)
-                            optim_path = optim_path.stem + '_optim' + optim_path.suffix
-                            torch.save(self.model.state_dict(),self.best_model_file)
-                            torch.save(self.optimizer.state_dict(),optim_path)     
-                            mlflow.pytorch.log_model(self,'mlflow_logged_models')
-                            curr_time = str(datetime.now())
-                            curr_time = '_'+curr_time.split()[1].split('.')[0]
-                            mlflow_save_path = Path('mlflow_saved_training_models')/\
-                                               (Path(self.best_model_file).stem+'_{}_{}'.format(str(round(epoch_accuracy,2)),str(epoch)+curr_time))
-                            mlflow.pytorch.save_model(self,mlflow_save_path)
-                    else:
-                        if self.model_type == 'multi_label_classifier':
+                        time_elapsed = time.time() - t2
+                        if time_elapsed > 60:
+                            time_elapsed /= 60.
+                            measure = 'min'
+                        else:
+                            measure = 'sec'    
+                        print('\n'+'/'*36+'\n'
+                                f"{time.asctime().split()[-2]}\n"
+                                f"Epoch {epoch+1}/{epochs}\n"    
+                                f"Validation time: {time_elapsed:.6f} {measure}\n"    
+                                f"Epoch training loss: {epoch_train_loss:.6f}\n"                        
+                                f"Epoch validation loss: {epoch_validation_loss:.6f}"
+                            )
+                        if self.model_type == 'classifier':# or self.num_classes is not None:
                             epoch_accuracy = eval_dict['accuracy']
                             mlflow.log_metric('Validation Accuracy',epoch_accuracy)
                             print("Validation accuracy: {:.3f}".format(epoch_accuracy))
@@ -191,28 +184,8 @@ class Network(nn.Module):
                                 class_acc = eval_dict['class_accuracies']
                                 for cl,ac in class_acc:
                                     print(f'{cl} accuracy: {ac:.4f}')
-                        # print('\\'*36+'/'*36+'\n')
-                        print('\\'*36+'\n')
-                        if saving_crit == 'loss':
-                            if self.best_validation_loss == None or (epoch_validation_loss <= self.best_validation_loss):
-                                print('\n**********Updating best validation loss**********\n')
-                                if self.best_validation_loss is not None:
-                                    print('Previous best: {:.7f}'.format(self.best_validation_loss))
-                                print('New best loss = {:.7f}\n'.format(epoch_validation_loss))
-                                print('*'*49+'\n')
-                                self.best_validation_loss = epoch_validation_loss
-                                mlflow.log_metric('Best Loss',self.best_validation_loss)
-                                optim_path = Path(self.best_model_file)
-                                optim_path = optim_path.stem + '_optim' + optim_path.suffix
-                                torch.save(self.model.state_dict(),self.best_model_file)
-                                torch.save(self.optimizer.state_dict(),optim_path)     
-                                mlflow.pytorch.log_model(self,'mlflow_logged_models')
-                                curr_time = str(datetime.now())
-                                curr_time = '_'+curr_time.split()[1].split('.')[0]
-                                mlflow_save_path = Path('mlflow_saved_training_models')/\
-                                    (Path(self.best_model_file).stem+'_{}_{}'.format(str(round(epoch_validation_loss,3)),str(epoch)+curr_time))
-                                mlflow.pytorch.save_model(self,mlflow_save_path)
-                        elif saving_crit == 'accuracy':
+                            # print('\\'*36+'/'*36+'\n')
+                            print('\\'*36+'\n')
                             if self.best_accuracy == 0. or (epoch_accuracy >= self.best_accuracy):
                                 print('\n**********Updating best accuracy**********\n')
                                 print('Previous best: {:.3f}'.format(self.best_accuracy))
@@ -228,10 +201,59 @@ class Network(nn.Module):
                                 curr_time = str(datetime.now())
                                 curr_time = '_'+curr_time.split()[1].split('.')[0]
                                 mlflow_save_path = Path('mlflow_saved_training_models')/\
-                                                (Path(self.best_model_file).stem+'_{}_{}'.format(str(round(epoch_accuracy,2)),str(epoch)+curr_time))
+                                    (Path(self.best_model_file).stem+'_{}_{}'.format(str(round(epoch_accuracy,2)),str(epoch+1)+curr_time))
                                 mlflow.pytorch.save_model(self,mlflow_save_path)
+                        else:
+                            if self.model_type == 'multi_label_classifier':
+                                epoch_accuracy = eval_dict['accuracy']
+                                mlflow.log_metric('Validation Accuracy',epoch_accuracy)
+                                print("Validation accuracy: {:.3f}".format(epoch_accuracy))
+                                print()
+                                if self.num_classes <= 5:
+                                    class_acc = eval_dict['class_accuracies']
+                                    for cl,ac in class_acc:
+                                        print(f'{cl} accuracy: {ac:.4f}')
+                            # print('\\'*36+'/'*36+'\n')
+                            print('\\'*36+'\n')
+                            if saving_crit == 'loss':
+                                if self.best_validation_loss == None or (epoch_validation_loss <= self.best_validation_loss):
+                                    print('\n**********Updating best validation loss**********\n')
+                                    if self.best_validation_loss is not None:
+                                        print('Previous best: {:.7f}'.format(self.best_validation_loss))
+                                    print('New best loss = {:.7f}\n'.format(epoch_validation_loss))
+                                    print('*'*49+'\n')
+                                    self.best_validation_loss = epoch_validation_loss
+                                    mlflow.log_metric('Best Loss',self.best_validation_loss)
+                                    optim_path = Path(self.best_model_file)
+                                    optim_path = optim_path.stem + '_optim' + optim_path.suffix
+                                    torch.save(self.model.state_dict(),self.best_model_file)
+                                    torch.save(self.optimizer.state_dict(),optim_path)     
+                                    mlflow.pytorch.log_model(self,'mlflow_logged_models')
+                                    curr_time = str(datetime.now())
+                                    curr_time = '_'+curr_time.split()[1].split('.')[0]
+                                    mlflow_save_path = Path('mlflow_saved_training_models')/\
+                                        (Path(self.best_model_file).stem+'_{}_{}'.format(str(round(epoch_validation_loss,3)),str(epoch+1)+curr_time))
+                                    mlflow.pytorch.save_model(self,mlflow_save_path)
+                            elif saving_crit == 'accuracy':
+                                if self.best_accuracy == 0. or (epoch_accuracy >= self.best_accuracy):
+                                    print('\n**********Updating best accuracy**********\n')
+                                    print('Previous best: {:.3f}'.format(self.best_accuracy))
+                                    print('New best: {:.3f}\n'.format(epoch_accuracy))
+                                    print('******************************************\n')
+                                    self.best_accuracy = epoch_accuracy
+                                    mlflow.log_metric('Best Accuracy',self.best_accuracy)
+                                    optim_path = Path(self.best_model_file)
+                                    optim_path = optim_path.stem + '_optim' + optim_path.suffix
+                                    torch.save(self.model.state_dict(),self.best_model_file)
+                                    torch.save(self.optimizer.state_dict(),optim_path)     
+                                    mlflow.pytorch.log_model(self,'mlflow_logged_models')
+                                    curr_time = str(datetime.now())
+                                    curr_time = '_'+curr_time.split()[1].split('.')[0]
+                                    mlflow_save_path = Path('mlflow_saved_training_models')/\
+                                        (Path(self.best_model_file).stem+'_{}_{}'.format(str(round(epoch_accuracy,2)),str(epoch+1)+curr_time))
+                                    mlflow.pytorch.save_model(self,mlflow_save_path)
 
-                    self.train()
+                        self.train()
         torch.cuda.empty_cache()
         if load_best:
             try:

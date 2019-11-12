@@ -126,8 +126,8 @@ class Network(nn.Module):
             upward_epochs = one_cycle_upward_epochs
             remaining_epochs = epochs-upward_epochs
             max_epochs = int(np.ceil(remaining_epochs/4))
-            downward_epochs = int(np.floor(remaining_epochs/2))
-            last_epochs = int(np.ceil(remaining_epochs/4))
+            downward_epochs = int(np.floor(remaining_epochs/3))
+            last_epochs = int(np.ceil(remaining_epochs/2))
             upward_step = (max_lr-start_lr)/upward_epochs
             downward_step = -((max_lr-last_lr)/downward_epochs)
             upward_lrs = list(np.arange(start_lr,max_lr,step=upward_step))
@@ -140,8 +140,8 @@ class Network(nn.Module):
                 for epoch in range(epochs):
                     print(f'Cycle: {cycle+1}/{num_cycles}')
                     print('Epoch:{:3d}/{}\n'.format(epoch+1,epochs))
-                    print(f'Learning Rate: {lrs[epoch]}')
                     if one_cycle_upward_epochs is not None:
+                        print(f'Learning Rate: {lrs[epoch]}')
                         self.optimizer.param_groups[0]['lr'] = lrs[epoch]
                     self.model = self.model.to(self.device)
                     mlflow.log_param('epochs',epochs)
@@ -213,6 +213,10 @@ class Network(nn.Module):
                                     class_acc = eval_dict['class_accuracies']
                                     for cl,ac in class_acc:
                                         print(f'{cl} accuracy: {ac:.4f}')
+                            elif self.model_type == 'super_res':
+                                epoch_psnr = eval_dict['psnr']
+                                mlflow.log_metric('Validation PSNR',epoch_psnr)
+                                print("Validation psnr: {:.3f}".format(epoch_psnr))
                             # print('\\'*36+'/'*36+'\n')
                             print('\\'*36+'\n')
                             if saving_crit == 'loss':
@@ -289,7 +293,7 @@ class Network(nn.Module):
                 loss.backward()
                 loss = loss.item()
             if clip:
-                nn.utils.clip_grad_norm(self.model.parameters(),1.)
+                nn.utils.clip_grad_norm_(self.model.parameters(),1.)
             optimizer.step()
             running_loss += loss
             if batches % print_every == 0:

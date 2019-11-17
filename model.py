@@ -238,6 +238,25 @@ class Network(nn.Module):
                                     mlflow_save_path = Path('mlflow_saved_training_models')/\
                                         (Path(self.best_model_file).stem+'_{}_{}'.format(str(round(epoch_validation_loss,3)),str(epoch+1)+curr_time))
                                     mlflow.pytorch.save_model(self,mlflow_save_path)
+                            elif saving_crit == 'psnr':
+                                if self.best_psnr == None or (epoch_psnr >= self.best_psnr):
+                                    print('\n**********Updating best psnr**********\n')
+                                    if self.psnr is not None:
+                                        print('Previous best: {:.7f}'.format(self.best_psnr))
+                                    print('New best psnr = {:.7f}\n'.format(epoch_psnr))
+                                    print('*'*49+'\n')
+                                    self.best_psnr = epoch_psnr
+                                    mlflow.log_metric('Best Psnr',self.best_psnr)
+                                    optim_path = Path(self.best_model_file)
+                                    optim_path = optim_path.stem + '_optim' + optim_path.suffix
+                                    torch.save(self.model.state_dict(),self.best_model_file)
+                                    torch.save(self.optimizer.state_dict(),optim_path)     
+                                    mlflow.pytorch.log_model(self,'mlflow_logged_models')
+                                    curr_time = str(datetime.now())
+                                    curr_time = '_'+curr_time.split()[1].split('.')[0]
+                                    mlflow_save_path = Path('mlflow_saved_training_models')/\
+                                        (Path(self.best_model_file).stem+'_{}_{}'.format(str(round(epoch_psnr,3)),str(epoch+1)+curr_time))
+                                    mlflow.pytorch.save_model(self,mlflow_save_path)
                             elif saving_crit == 'accuracy':
                                 if self.best_accuracy == 0. or (epoch_accuracy >= self.best_accuracy):
                                     print('\n**********Updating best accuracy**********\n')

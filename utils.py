@@ -277,6 +277,12 @@ class Flatten(nn.Module):
     def forward(self, input):
         return input.view(input.size(0), -1)
 
+class SaveFeatures():
+    features=None
+    def __init__(self, m): self.hook = m.register_forward_hook(self.hook_fn)
+    def hook_fn(self, module, input, output): self.features = output
+    def remove(self): self.hook.remove() 
+
 DAI_AvgPool = nn.AdaptiveAvgPool2d(1)
 
 def flatten_tensor(x):

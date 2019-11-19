@@ -5,6 +5,7 @@ import sr_unet_loss
 import sr_model_loss
 from dai_imports import*
 from rdn import RDN, RDN_DN
+from pixel_shuffle import PixelShuffle_ICNR
 
 class SuperRes(Network):
     def __init__(self,
@@ -108,6 +109,11 @@ class SuperResUnet(Network):
                  criterion = sr_unet_loss.FeatureLoss(),
                  img_mean = [0.485, 0.456, 0.406],
                  img_std = [0.229, 0.224, 0.225],
+                 inter_mode = 'bicubic',
+                 attention_type =  None,
+                 shuffle_blur = True,
+                 use_bn = True,
+                 denorm = True,
                 #  p_blocks_start = 2,
                 #  p_blocks_end = 5,
                 #  p_layer_wgts = [5,15,2],
@@ -123,8 +129,14 @@ class SuperResUnet(Network):
                  ):
 
         super().__init__(device=device)
+
+        print('Super Resolution Using U-Net.')
+
         self.set_scale(upscale_factor)
-        self.model = smp.Unet(encoder_name = model_name, classes = 3)
+        self.set_inter_mode(inter_mode)
+        # if 'se_' in model_name:
+        #     attention_type = 'scse'
+        self.setup_model(model_name, use_bn, attention_type, shuffle_blur)
         if model_weights:
             self.model.load_state_dict(model_weights)
         self.model.to(device)
@@ -137,19 +149,39 @@ class SuperResUnet(Network):
         self.best_psnr = best_psnr
         self.img_mean = img_mean
         self.img_std = img_std
-        
+        self.denorm = denorm
+
+    def setup_model(self, model_name, use_bn, attention_type, shuffle_blur):
+        unet = smp.Unet(encoder_name=model_name, classes=3, decoder_use_batchnorm=use_bn, attention_type=attention_type, shuffle_blur=shuffle_blur)
+        if self.inter_mode.lower() == 'shuffle':
+            shuffle = PixelShuffle_ICNR(3, 3, scale=self.upscale_factor, blur=True)
+            self.model = nn.Sequential(shuffle,unet)
+            # conv1 = nn.Conv2d(3,self.upscale_factor**2,3,1,1)
+            # conv2 = nn.Conv2d(1,3,3,1,1)
+            # self.model = nn.Sequential(conv1, nn.PixelShuffle(self.upscale_factor), conv2, unet)
+        else:
+            self.model = nn.Sequential(unet)
+
     def set_scale(self,scale):
         self.upscale_factor = scale
 
-    def forward(self,x):
-        x = F.interpolate(x,scale_factor=self.upscale_factor,mode='bicubic')
-        x = self.model(x)
+    def set_inter_mode(self,mode):
+        self.inter_mode = mode
 
-        x[:, 0, :, :] = x[:, 0, :, :] * self.img_std[0] + self.img_mean[0]
-        x[:, 1, :, :] = x[:, 1, :, :] * self.img_std[1] + self.img_mean[1]
-        x[:, 2, :, :] = x[:, 2, :, :] * self.img_std[2] + self.img_mean[2]
+    def forward(self,x):
+        if self.inter_mode.lower() != 'shuffle':
+            x = F.interpolate(x,scale_factor=self.upscale_factor,mode=self.inter_mode)
+        x = self.model(x)
+        if self.denorm:
+            x[:, 0, :, :] = x[:, 0, :, :] * self.img_std[0] + self.img_mean[0]
+            x[:, 1, :, :] = x[:, 1, :, :] * self.img_std[1] + self.img_mean[1]
+            x[:, 2, :, :] = x[:, 2, :, :] * self.img_std[2] + self.img_mean[2]
         
         return x
+
+    def freeze_encoder(self):
+        for p in self.model[-1].encoder.parameters():
+            p.requires_grad = False
 
     def compute_loss(self,outputs,labels):
 

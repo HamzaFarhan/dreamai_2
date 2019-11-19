@@ -273,9 +273,11 @@ class dai_super_res_dataset(Dataset):
         self.data_dir = data_dir
         self.data = data
         self.pre_transforms = albu.Compose(transforms_['pre_transforms'])
-        self.input_transform = albu.Compose(transforms_['input'])
-        self.target_transform = albu.Compose(transforms_['target'])
-        self.resized_target_transform = albu.Compose(transforms_['resized_target'])
+        self.pre_input_transforms = albu.Compose(transforms_['pre_input_transforms'])
+        self.downscale_transforms = albu.Compose(transforms_['downscale'])
+        self.input_transforms = albu.Compose(transforms_['input'])
+        self.target_transforms = albu.Compose(transforms_['target'])
+        self.resized_target_transforms = albu.Compose(transforms_['resized_target'])
 
     def __len__(self):
         return len(self.data)
@@ -283,12 +285,17 @@ class dai_super_res_dataset(Dataset):
     def __getitem__(self, index):
         img_path = os.path.join(self.data_dir,self.data.iloc[index, 0])
         img_ = utils.bgr2rgb(cv2.imread(str(img_path)))
-        print(self.pre_transforms.transforms.transforms)
         if len(self.pre_transforms.transforms.transforms) > 0:
-            img_ = self.input_transform(image=img_)['image']    
-        img = self.input_transform(image=img_)['image']
-        target = self.target_transform(image=img_)['image']
-        resized_target = self.resized_target_transform(image=img_)['image']
+            img_ = self.pre_transforms(image=img_)['image']    
+        target = self.target_transforms(image=img_)['image']
+        if len(self.pre_input_transforms.transforms.transforms) > 0:
+            img_ = self.pre_input_transforms(image=img_)['image']   
+        img_ = self.downscale_transforms(image=img_)['image']
+        # print(f'img_: {img_.shape}')
+        img = self.input_transforms(image=img_)['image']
+        # print(f'img: {img.shape}')
+        resized_target = self.resized_target_transforms(image=img_)['image']
+        # print(f'rs: {resized_target.shape}')
         return img, target, resized_target  
 
 def rescale_landmarks(landmarks,row_scale,col_scale):
@@ -597,7 +604,7 @@ class DataProcessor:
         return ret
         
     def get_data(self, data_dict = None, s = (224,224), dataset = dai_image_csv_dataset, train_resize_transform = None, val_resize_transform = None, 
-                 bs = 32, balance = False, super_res_crop = 256, super_res_upscale_factor = 1,
+                 bs = 32, balance = False, super_res_crop = 256, super_res_upscale_factor = 1, sr_input_tfms = [],
                  tfms = [],bal_tfms = None,num_workers = 8, stats_percentage = 0.6,channels = 3, normalise = True, img_mean = None, img_std = None):
         
         self.image_size = s
@@ -618,7 +625,7 @@ class DataProcessor:
 
         # resize_transform = transforms.Resize(s,interpolation=Image.NEAREST)
         if train_resize_transform is None:
-            train_resize_transform = albu.Resize(s[0],s[1],interpolation=2)          
+            train_resize_transform = albu.Resize(s[0],s[1],interpolation=1)          
         if img_mean is None and self.img_mean is None: # and not sr:
             # temp_tfms = [resize_transform, transforms.ToTensor()]
             temp_tfms = [train_resize_transform, AT.ToTensor()]
@@ -648,22 +655,48 @@ class DataProcessor:
             super_res_crop = super_res_crop - (super_res_crop % super_res_upscale_factor)
             super_res_transforms = {
                 'pre_transforms':[albu.RandomCrop(super_res_crop,super_res_crop)]+tfms,
+                'pre_input_transforms':sr_input_tfms,
+                'downscale':
+                            # [albu.OneOf([
+                            #             albu.Resize((super_res_crop // super_res_upscale_factor),
+                            #                         (super_res_crop // super_res_upscale_factor),
+                            #                         interpolation = 0),
+                            #             albu.Resize((super_res_crop // super_res_upscale_factor),
+                            #                         (super_res_crop // super_res_upscale_factor),
+                            #                         interpolation = 1),
+                            #             albu.Resize((super_res_crop // super_res_upscale_factor),
+                            #                         (super_res_crop // super_res_upscale_factor),
+                            #                         interpolation = 2),
+                            #             ],p=1)
+                            # ],
+                            [
+                                albu.Resize((super_res_crop // super_res_upscale_factor),
+                                            (super_res_crop // super_res_upscale_factor),
+                                            interpolation = 1)
+                            ],
                 'input':[
                         # albu.CenterCrop(super_res_crop,super_res_crop),
-                        albu.Resize((super_res_crop // super_res_upscale_factor),
-                                    (super_res_crop // super_res_upscale_factor),
-                                    interpolation = 2),
+                        # albu.Resize((super_res_crop // super_res_upscale_factor),
+                        #             (super_res_crop // super_res_upscale_factor),
+                        #             interpolation = 2),
                         albu.Normalize(self.img_mean,self.img_std),
                         AT.ToTensor()
                 ],
                 'target':[
+                        # albu.CenterCrop(super_res_crop,super_res_crop),
                         AT.ToTensor()
                 ],
                 'resized_target':[
-                    albu.Resize((super_res_crop // super_res_upscale_factor),
-                                (super_res_crop // super_res_upscale_factor),
-                                interpolation = 2),
-                    albu.Resize(super_res_crop,super_res_crop,interpolation = 2),
+                    # albu.CenterCrop(super_res_crop,super_res_crop),
+                    # albu.Resize((super_res_crop // super_res_upscale_factor),
+                    #             (super_res_crop // super_res_upscale_factor),
+                    #             interpolation = 2),
+                    albu.Resize(super_res_crop,super_res_crop,interpolation = 1),
+                    # albu.OneOf([
+                    #             albu.Resize(super_res_crop,super_res_crop,interpolation = 0),
+                    #             albu.Resize(super_res_crop,super_res_crop,interpolation = 1),
+                    #             albu.Resize(super_res_crop,super_res_crop,interpolation = 2),
+                    #             ],p=1),
                     AT.ToTensor()
                 ]
             }
@@ -704,7 +737,7 @@ class DataProcessor:
                 print(tfms)
                 print()
             if val_resize_transform is None:
-                val_resize_transform = albu.Resize(s[0],s[1],interpolation=2)
+                val_resize_transform = albu.Resize(s[0],s[1],interpolation=1)
             val_test_tfms = [
                 val_resize_transform,
                 # transforms.ToTensor(),

@@ -157,7 +157,10 @@ def imgs_to_batch(paths = [], imgs = [], bs = 1, size = None, norm = False, img_
         tfms.insert(1,albu.Normalize(img_mean,img_std))
     tfms = albu.Compose(tfms)
     image_dataset = imgs_to_batch_dataset(data = data, transforms_ = tfms, channels = channels)
-    loader = DataLoader(image_dataset, batch_size = bs, shuffle=True, num_workers = num_workers)
+    if size is None:
+        loader = None
+    else:
+        loader = DataLoader(image_dataset, batch_size = bs, shuffle=True, num_workers = num_workers)
     return image_dataset,loader
 
 # def imgs_to_batch_old(paths = [],imgs = [], size = None, smaller_factor = None, enlarge_factor = None, mean = None, std = None,
@@ -221,7 +224,10 @@ def to_batch(paths = [],imgs = [], size = None, channels=3):
 def batch_to_imgs(batch,mean=None,std=None):
     imgs = []
     for i in batch:
-        imgs.append(denorm_img_general(i,mean,std))
+        if mean is not None:
+            imgs.append(denorm_img_general(i,mean,std))
+        else:
+            imgs.append(i)
     return imgs    
 
 def mini_batch(dataset,bs,start=0):

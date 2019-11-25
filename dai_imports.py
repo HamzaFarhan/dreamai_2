@@ -49,6 +49,7 @@ from collections import defaultdict
 from PIL import ImageDraw, ImageFont
 from itertools import product as product
 from albumentations import pytorch as AT
+import segmentation_models_pytorch as smp
 from PIL import Image, ImageDraw, ImageFont
 from sklearn.preprocessing import LabelBinarizer
 from sklearn.model_selection import train_test_split

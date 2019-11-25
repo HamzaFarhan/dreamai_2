@@ -143,7 +143,6 @@ class dai_obj_dataset(Dataset):
 
         return images, boxes, labels, difficulties  # tensor (N, 3, 300, 300), 3 lists of N tensors each
 
-
 class dai_image_csv_dataset_food(Dataset):
     
     def __init__(self, data_dir, data, transforms_ = None):
@@ -258,15 +257,46 @@ class dai_image_dataset(Dataset):
         return len(self.data_df)
 
     def __getitem__(self, index):
-        img_path = os.path.join(self.data_dir,self.data_df.iloc[index, 0])
-        img = Image.open(img_path)
-        img = img.convert('RGB')
-        target = img.copy()
+        img_path = os.path.join(self.data_dir,self.data.iloc[index, 0])
+        img = utils.bgr2rgb(cv2.imread(str(img_path)))
+        target = utils.bgr2rgb(cv2.imread(str(img_path)))
         if self.input_transforms:
             img = self.input_transforms(img)
         if self.target_transforms:
             target = self.target_transforms(target)
         return img, target
+
+class dai_super_res_dataset(Dataset):
+
+    def __init__(self, data_dir, data, transforms_,):
+        super(dai_super_res_dataset, self).__init__()
+        self.data_dir = data_dir
+        self.data = data
+        self.pre_transforms = albu.Compose(transforms_['pre_transforms'])
+        self.pre_input_transforms = albu.Compose(transforms_['pre_input_transforms'])
+        # self.downscale_transforms = albu.Compose(transforms_['downscale'])
+        self.input_transforms = albu.Compose(transforms_['input'])
+        self.target_transforms = albu.Compose(transforms_['target'])
+        self.resized_target_transforms = albu.Compose(transforms_['resized_target'])
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, index):
+        img_path = os.path.join(self.data_dir,self.data.iloc[index, 0])
+        try:
+            img_ = utils.bgr2rgb(cv2.imread(str(img_path)))
+        except:
+            print(img_path)
+        if len(self.pre_transforms.transforms.transforms) > 0:
+            img_ = self.pre_transforms(image=img_)['image']    
+        target = self.target_transforms(image=img_)['image']
+        if len(self.pre_input_transforms.transforms.transforms) > 0:
+            img_ = self.pre_input_transforms(image=img_)['image']   
+        # img_ = self.downscale_transforms(image=img_)['image']
+        img = self.input_transforms(image=img_)['image']
+        resized_target = self.resized_target_transforms(image=img_)['image']
+        return img, target, resized_target  
 
 def rescale_landmarks(landmarks,row_scale,col_scale):
     landmarks2 = copy.deepcopy(torch.Tensor(landmarks).reshape((-1,2)))
@@ -363,7 +393,7 @@ def load_obj(path):
 
 class DataProcessor:
     
-    def __init__(self, data_path = None, train_csv = None, val_csv = None,test_csv = None, class_names = [], seg = False, obj = False,
+    def __init__(self, data_path = None, train_csv = None, val_csv = None,test_csv = None, class_names = [], seg = False, obj = False, sr = False,
                  multi_label=False,multi_head = False,tr_name = 'train', val_name = 'val', test_name = 'test', extension = None, setup_data = True):
         
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -373,6 +403,7 @@ class DataProcessor:
                                                                       tr_name,val_name,test_name,extension)
         self.seg = seg
         self.obj = obj
+        self.sr = sr
         self.multi_head = multi_head
         self.multi_label = multi_label
         self.single_label = False
@@ -426,6 +457,8 @@ class DataProcessor:
             print('\nSemantic Segmentation\n')
         elif self.obj:
             print('\nObject Detection\n')
+        elif self.sr:
+            print('\nSuper Resolution\n')
         else:
             if self.multi_head:
                 print('\nMulti-head Classification\n')
@@ -546,7 +579,7 @@ class DataProcessor:
         self.data_dfs = {self.tr_name:train_df, self.val_name:val_df, self.test_name:test_df}
         data_dict = {'data_dfs':self.data_dfs,'data_dir':self.data_dir,'num_classes':self.num_classes,'class_names':self.class_names,
                     # 'num_multi_classes':self.num_multi_classes,'multi_class_names':self.multi_class_names,
-                    'minorities':self.minorities,'class_diffs':self.class_diffs,'seg':self.seg,'obj':self.obj,
+                    'minorities':self.minorities,'class_diffs':self.class_diffs,'seg':self.seg,'obj':self.obj,'sr':self.sr,
                     'single_label':self.single_label,'multi_label':self.multi_label}
         self.data_dict = data_dict
         return data_dict
@@ -571,15 +604,15 @@ class DataProcessor:
         return ret
         
     def get_data(self, data_dict = None, s = (224,224), dataset = dai_image_csv_dataset, train_resize_transform = None, val_resize_transform = None, 
-                 bs = 32, balance = False,
-                 tfms = None,bal_tfms = None,num_workers = 8, stats_percentage = 0.6,channels = 3, normalise = True, img_mean = None, img_std = None):
+                 bs = 32, balance = False, super_res_crop = 256, super_res_upscale_factor = 1, sr_input_tfms = [],
+                 tfms = [],bal_tfms = None,num_workers = 8, stats_percentage = 0.6,channels = 3, normalise = True, img_mean = None, img_std = None):
         
         self.image_size = s
         if not data_dict:
             data_dict = self.data_dict
-        data_dfs,data_dir,minorities,class_diffs,single_label,seg,obj = (data_dict['data_dfs'],data_dict['data_dir'],
+        data_dfs,data_dir,minorities,class_diffs,single_label,seg,obj,sr = (data_dict['data_dfs'],data_dict['data_dir'],
                                                         data_dict['minorities'],data_dict['class_diffs'],
-                                                        data_dict['single_label'],data_dict['seg'],data_dict['obj'])
+                                                        data_dict['single_label'],data_dict['seg'],data_dict['obj'],data_dict['sr'])
         if not single_label:
            balance = False                                                 
         if not bal_tfms:
@@ -592,8 +625,8 @@ class DataProcessor:
 
         # resize_transform = transforms.Resize(s,interpolation=Image.NEAREST)
         if train_resize_transform is None:
-            train_resize_transform = albu.Resize(s[0],s[1],interpolation=0)          
-        if img_mean is None and self.img_mean is None:
+            train_resize_transform = albu.Resize(s[0],s[1],interpolation=1)          
+        if img_mean is None and self.img_mean is None: # and not sr:
             # temp_tfms = [resize_transform, transforms.ToTensor()]
             temp_tfms = [train_resize_transform, AT.ToTensor()]
             frac_data = data_dfs[self.tr_name].sample(frac = stats_percentage).reset_index(drop=True).copy()
@@ -601,26 +634,78 @@ class DataProcessor:
             self.img_mean,self.img_std = get_img_stats(temp_dataset,channels)
         elif self.img_mean is None:
             self.img_mean,self.img_std = img_mean,img_std
-        if obj:
-            obj_transform = obj_utils.transform(size = s, mean = self.img_mean, std = self.img_std)
-            dataset = dai_obj_dataset
-            tfms = obj_transform.train_transform
-            val_test_tfms = obj_transform.val_test_transform
-            data_transforms = {
-                self.tr_name: tfms,
-                self.val_name: val_test_tfms,
-                self.test_name: val_test_tfms
+        # if obj:
+        #     obj_transform = obj_utils.transform(size = s, mean = self.img_mean, std = self.img_std)
+        #     dataset = dai_obj_dataset
+        #     tfms = obj_transform.train_transform
+        #     val_test_tfms = obj_transform.val_test_transform
+        #     data_transforms = {
+        #         self.tr_name: tfms,
+        #         self.val_name: val_test_tfms,
+        #         self.test_name: val_test_tfms
+        #     }
+        #     has_difficult = (len(data_dfs[self.tr_name].columns) == 4)
+        #     image_datasets = {x: dataset(data_dir = data_dir,data = data_dfs[x],tfms = data_transforms[x],
+        #                         has_difficult = has_difficult)
+        #                       for x in [self.tr_name, self.val_name, self.test_name]}
+        #     dataloaders = {x: DataLoader(image_datasets[x], batch_size=bs,collate_fn=image_datasets[x].collate_fn,
+        #                                                 shuffle=True, num_workers=num_workers)
+        #                 for x in [self.tr_name, self.val_name, self.test_name]}
+        if sr:
+            super_res_crop = super_res_crop - (super_res_crop % super_res_upscale_factor)
+            super_res_transforms = {
+                'pre_transforms':[albu.CenterCrop(super_res_crop,super_res_crop)]+tfms,
+                'pre_input_transforms':sr_input_tfms,
+                'downscale':
+                            # [albu.OneOf([
+                            #             albu.Resize((super_res_crop // super_res_upscale_factor),
+                            #                         (super_res_crop // super_res_upscale_factor),
+                            #                         interpolation = 0),
+                            #             albu.Resize((super_res_crop // super_res_upscale_factor),
+                            #                         (super_res_crop // super_res_upscale_factor),
+                            #                         interpolation = 1),
+                            #             albu.Resize((super_res_crop // super_res_upscale_factor),
+                            #                         (super_res_crop // super_res_upscale_factor),
+                            #                         interpolation = 2),
+                            #             ],p=1)
+                            # ],
+                            [
+                                albu.Resize((super_res_crop // super_res_upscale_factor),
+                                            (super_res_crop // super_res_upscale_factor),
+                                            interpolation = 1)
+                            ],
+                'input':[
+                        # albu.CenterCrop(super_res_crop,super_res_crop),
+                        albu.Resize((super_res_crop // super_res_upscale_factor),
+                                    (super_res_crop // super_res_upscale_factor),
+                                    interpolation = 1),
+                        albu.Normalize(self.img_mean,self.img_std),
+                        AT.ToTensor()
+                ],
+                'target':[
+                        # albu.CenterCrop(super_res_crop,super_res_crop),
+                        # albu.Normalize(self.img_mean,self.img_std),
+                        AT.ToTensor()
+                ],
+                'resized_target':[
+                    # albu.CenterCrop(super_res_crop,super_res_crop),
+                    albu.Resize((super_res_crop // super_res_upscale_factor),
+                                (super_res_crop // super_res_upscale_factor),
+                                interpolation = 1),
+                    albu.Resize(super_res_crop,super_res_crop,interpolation = 1),
+                    # albu.OneOf([
+                    #             albu.Resize(super_res_crop,super_res_crop,interpolation = 0),
+                    #             albu.Resize(super_res_crop,super_res_crop,interpolation = 1),
+                    #             albu.Resize(super_res_crop,super_res_crop,interpolation = 2),
+                    #             ],p=1),
+                    AT.ToTensor()
+                ]
             }
-            has_difficult = (len(data_dfs[self.tr_name].columns) == 4)
-            image_datasets = {x: dataset(data_dir = data_dir,data = data_dfs[x],tfms = data_transforms[x],
-                                has_difficult = has_difficult)
-                              for x in [self.tr_name, self.val_name, self.test_name]}
-            dataloaders = {x: DataLoader(image_datasets[x], batch_size=bs,collate_fn=image_datasets[x].collate_fn,
-                                                        shuffle=True, num_workers=num_workers)
-                        for x in [self.tr_name, self.val_name, self.test_name]}
+            image_datasets = {x: dataset(data_dir,data_dfs[x],super_res_transforms)
+                             for x in [self.tr_name, self.val_name, self.test_name]}
 
         else:   
-            if not tfms:
+            if len(tfms) == 0:
                 # if normalise:
                 #     tfms = [
                 #         resize_transform,
@@ -653,7 +738,7 @@ class DataProcessor:
                 print(tfms)
                 print()
             if val_resize_transform is None:
-                val_resize_transform = albu.Resize(s[0],s[1],interpolation=0)
+                val_resize_transform = albu.Resize(s[0],s[1],interpolation=1)
             val_test_tfms = [
                 val_resize_transform,
                 # transforms.ToTensor(),
@@ -667,12 +752,12 @@ class DataProcessor:
                 self.test_name: val_test_tfms
             }
 
-            if balance:
-                image_datasets = {x: dataset(data_dir = data_dir,data = data_dfs[x],
-                                            transforms_ = data_transforms[x],minorities = minorities,diffs = class_diffs,
-                                            bal_tfms = bal_tfms[x],channels = channels,seg = seg)
-                            for x in [self.tr_name, self.val_name, self.test_name]}    
-            elif self.multi_head:
+            # if balance:
+            #     image_datasets = {x: dataset(data_dir = data_dir,data = data_dfs[x],
+            #                                 transforms_ = data_transforms[x],minorities = minorities,diffs = class_diffs,
+            #                                 bal_tfms = bal_tfms[x],channels = channels,seg = seg)
+            #                 for x in [self.tr_name, self.val_name, self.test_name]}    
+            if self.multi_head:
                 dataset = dai_image_csv_dataset_multi_head
                 image_datasets = {x: dataset(data_dir = data_dir,data = data_dfs[x],
                                             transforms_ = data_transforms[x],channels = channels)
@@ -681,10 +766,10 @@ class DataProcessor:
                 image_datasets = {x: dataset(data_dir = data_dir,data = data_dfs[x],
                                             transforms_ = data_transforms[x],channels = channels,seg = seg)
                             for x in [self.tr_name, self.val_name, self.test_name]}
-            
-            dataloaders = {x: DataLoader(image_datasets[x], batch_size=bs,
-                                                        shuffle=True, num_workers=num_workers)
-                        for x in [self.tr_name, self.val_name, self.test_name]}
+        
+        dataloaders = {x: DataLoader(image_datasets[x], batch_size=bs,
+                                                    shuffle=True, num_workers=num_workers)
+                    for x in [self.tr_name, self.val_name, self.test_name]}
         dataset_sizes = {x: len(image_datasets[x]) for x in [self.tr_name, self.val_name, self.test_name]}
         
         self.image_datasets,self.dataloaders,self.dataset_sizes = (image_datasets,dataloaders,dataset_sizes)

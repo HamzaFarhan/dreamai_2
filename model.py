@@ -114,7 +114,7 @@ class Network(nn.Module):
         return loss
 
     def fit(self,trainloader,validloader,cycle_len=2,num_cycles=1,print_every=10,validate_every=1,save_best_every=1,clip=False,load_best=False,
-            eval_thresh=0.5,saving_crit='loss',one_cycle_upward_epochs=None):
+            eval_thresh=0.5,saving_crit='loss',one_cycle_upward_epochs=None, use_bn=True):
         epochs = cycle_len
         optim_path = Path(self.best_model_file)
         optim_path = optim_path.stem + '_optim' + optim_path.suffix
@@ -126,8 +126,8 @@ class Network(nn.Module):
             upward_epochs = one_cycle_upward_epochs
             remaining_epochs = epochs-upward_epochs
             max_epochs = int(np.ceil(remaining_epochs/4))
-            downward_epochs = int(np.floor(remaining_epochs/2))
-            last_epochs = int(np.ceil(remaining_epochs/4))
+            downward_epochs = int(np.floor(remaining_epochs/3))
+            last_epochs = int(np.ceil(remaining_epochs/2))
             upward_step = (max_lr-start_lr)/upward_epochs
             downward_step = -((max_lr-last_lr)/downward_epochs)
             upward_lrs = list(np.arange(start_lr,max_lr,step=upward_step))
@@ -140,14 +140,14 @@ class Network(nn.Module):
                 for epoch in range(epochs):
                     print(f'Cycle: {cycle+1}/{num_cycles}')
                     print('Epoch:{:3d}/{}\n'.format(epoch+1,epochs))
-                    print(f'Learning Rate: {lrs[epoch]}')
                     if one_cycle_upward_epochs is not None:
+                        print(f'Learning Rate: {lrs[epoch]}')
                         self.optimizer.param_groups[0]['lr'] = lrs[epoch]
                     self.model = self.model.to(self.device)
                     mlflow.log_param('epochs',epochs)
                     mlflow.log_param('lr',self.optimizer.param_groups[0]['lr'])
                     mlflow.log_param('bs',trainloader.batch_size)
-                    epoch_train_loss =  self.train_((epoch,epochs),trainloader,self.optimizer,print_every,clip=clip)  
+                    epoch_train_loss =  self.train_((epoch,epochs),trainloader,self.optimizer,print_every,clip=clip, use_bn=use_bn)  
                             
                     if  validate_every and (epoch % validate_every == 0):
                         t2 = time.time()
@@ -213,6 +213,10 @@ class Network(nn.Module):
                                     class_acc = eval_dict['class_accuracies']
                                     for cl,ac in class_acc:
                                         print(f'{cl} accuracy: {ac:.4f}')
+                            elif self.model_type == 'super_res':
+                                epoch_psnr = eval_dict['psnr']
+                                mlflow.log_metric('Validation PSNR',epoch_psnr)
+                                print("Validation psnr: {:.3f}".format(epoch_psnr))
                             # print('\\'*36+'/'*36+'\n')
                             print('\\'*36+'\n')
                             if saving_crit == 'loss':
@@ -233,6 +237,25 @@ class Network(nn.Module):
                                     curr_time = '_'+curr_time.split()[1].split('.')[0]
                                     mlflow_save_path = Path('mlflow_saved_training_models')/\
                                         (Path(self.best_model_file).stem+'_{}_{}'.format(str(round(epoch_validation_loss,3)),str(epoch+1)+curr_time))
+                                    mlflow.pytorch.save_model(self,mlflow_save_path)
+                            elif saving_crit == 'psnr':
+                                if self.best_psnr == None or (epoch_psnr >= self.best_psnr):
+                                    print('\n**********Updating best psnr**********\n')
+                                    if self.psnr is not None:
+                                        print('Previous best: {:.7f}'.format(self.best_psnr))
+                                    print('New best psnr = {:.7f}\n'.format(epoch_psnr))
+                                    print('*'*49+'\n')
+                                    self.best_psnr = epoch_psnr
+                                    mlflow.log_metric('Best Psnr',self.best_psnr)
+                                    optim_path = Path(self.best_model_file)
+                                    optim_path = optim_path.stem + '_optim' + optim_path.suffix
+                                    torch.save(self.model.state_dict(),self.best_model_file)
+                                    torch.save(self.optimizer.state_dict(),optim_path)     
+                                    mlflow.pytorch.log_model(self,'mlflow_logged_models')
+                                    curr_time = str(datetime.now())
+                                    curr_time = '_'+curr_time.split()[1].split('.')[0]
+                                    mlflow_save_path = Path('mlflow_saved_training_models')/\
+                                        (Path(self.best_model_file).stem+'_{}_{}'.format(str(round(epoch_psnr,3)),str(epoch+1)+curr_time))
                                     mlflow.pytorch.save_model(self,mlflow_save_path)
                             elif saving_crit == 'accuracy':
                                 if self.best_accuracy == 0. or (epoch_accuracy >= self.best_accuracy):
@@ -265,10 +288,15 @@ class Network(nn.Module):
             except:
                 pass    
 
-    def train_(self,e,trainloader,optimizer,print_every,clip=False):
+    def train_(self,e,trainloader,optimizer,print_every,clip=False,use_bn=True):
 
-        epoch,epochs = e
         self.train()
+        if not use_bn:
+            self.model[0].encoder.apply(remove_bn)
+            for m in self.model[0].encoder.modules():
+                if isinstance(m,nn.Sequential):
+                    m.apply(remove_bn)
+        epoch,epochs = e
         t0 = time.time()
         t1 = time.time()
         batches = 0
@@ -289,7 +317,7 @@ class Network(nn.Module):
                 loss.backward()
                 loss = loss.item()
             if clip:
-                nn.utils.clip_grad_norm(self.model.parameters(),1.)
+                nn.utils.clip_grad_norm_(self.model.parameters(),1.)
             optimizer.step()
             running_loss += loss
             if batches % print_every == 0:

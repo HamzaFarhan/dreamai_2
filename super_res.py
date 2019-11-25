@@ -1,7 +1,8 @@
-import sr_model
+import sr_resnet
+import sr_densenet
 from utils import *
 from model import *
-import sr_unet_loss
+import feature_loss
 import sr_model_loss
 from dai_imports import*
 from rdn import RDN, RDN_DN
@@ -54,7 +55,7 @@ class SuperRes(Network):
                             rdb_conv_layers=rdb_conv_layers,upscale_factor=upscale_factor).to(device)
         elif model_name.lower() == 'sr_model':
             print('Using SrResnet for super res.')
-            self.backbone = sr_model.SrResnet(scale=upscale_factor,res_blocks=res_blocks).to(device)
+            self.backbone = sr_resnet.SrResnet(scale=upscale_factor,res_blocks=res_blocks).to(device)
             
     def forward(self,x):
         if self.kornia_transforms is not None:
@@ -106,7 +107,7 @@ class SuperResUnet(Network):
                  kornia_transforms = None,
                  lr = 0.08,
                  upscale_factor = 4, 
-                 criterion = sr_unet_loss.FeatureLoss(),
+                 criterion = feature_loss.FeatureLoss(),
                  img_mean = [0.485, 0.456, 0.406],
                  img_std = [0.229, 0.224, 0.225],
                  inter_mode = 'bicubic',
@@ -124,24 +125,22 @@ class SuperResUnet(Network):
                  best_validation_loss = None,
                  best_psnr = None,
                  best_model_file = 'best_super_res_sgd.pth',
+                 encoder_weights = 'imagenet',
                  model_weights = None,
                  optim_weights = None
                  ):
 
         super().__init__(device=device)
 
-        print('Super Resolution Using U-Net.')
+        print(f'Super Resolution using U-Net with {model_name} encoder.')
 
         self.set_scale(upscale_factor)
         self.set_inter_mode(inter_mode)
-        # if 'se_' in model_name:
-        #     attention_type = 'scse'
-        self.setup_model(model_name, use_bn, attention_type, shuffle_blur)
+        self.set_denorm(denorm)
+        self.setup_model(model_name, encoder_weights,  use_bn, attention_type, shuffle_blur)
         if model_weights:
             self.model.load_state_dict(model_weights)
         self.model.to(device)
-        # if loss_func.lower() == 'perceptual':
-        #     criterion = sr_unet_loss.FeatureLoss(p_blocks_start,p_blocks_end,p_layer_wgts,p_criterion,device = device)
         self.set_model_params(criterion = criterion,optimizer_name = optimizer_name,lr = lr,model_name = model_name,model_type = model_type,
                               best_validation_loss = best_validation_loss,best_model_file = best_model_file)
         if optim_weights:
@@ -149,18 +148,29 @@ class SuperResUnet(Network):
         self.best_psnr = best_psnr
         self.img_mean = img_mean
         self.img_std = img_std
-        self.denorm = denorm
 
-    def setup_model(self, model_name, use_bn, attention_type, shuffle_blur):
-        unet = smp.Unet(encoder_name=model_name, classes=3, decoder_use_batchnorm=use_bn, attention_type=attention_type, shuffle_blur=shuffle_blur)
+    def setup_model(self, model_name='resnext50_32x4d', encoder_weights='imagenet', use_bn=False, attention_type=None, shuffle_blur=True):
+        unet = smp.Unet(encoder_name=model_name, encoder_weights=encoder_weights, classes=3,
+                        decoder_use_batchnorm=use_bn, attention_type=attention_type, shuffle_blur=shuffle_blur)
+        # if self.inter_mode.lower() == 'shuffle':
+        #     num_shuffles = self.upscale_factor//2
+        #     shuffle = [PixelShuffle_ICNR(3, 3, scale=2, blur=True)]*num_shuffles
+        #     # shuffle = [PixelShuffle_ICNR(3, 3, scale=self.upscale_factor, blur=True)]
+        #     self.model = nn.Sequential(*shuffle,unet)
+        #     # conv1 = nn.Conv2d(3,self.upscale_factor**2,3,1,1)
+        #     # conv2 = nn.Conv2d(1,3,3,1,1)
+        #     # self.model = nn.Sequential(conv1, nn.PixelShuffle(self.upscale_factor), conv2, unet)
         if self.inter_mode.lower() == 'shuffle':
-            shuffle = PixelShuffle_ICNR(3, 3, scale=self.upscale_factor, blur=True)
-            self.model = nn.Sequential(shuffle,unet)
-            # conv1 = nn.Conv2d(3,self.upscale_factor**2,3,1,1)
-            # conv2 = nn.Conv2d(1,3,3,1,1)
-            # self.model = nn.Sequential(conv1, nn.PixelShuffle(self.upscale_factor), conv2, unet)
+            shuffle = PixelShuffle_ICNR(3, 3, self.upscale_factor, shuffle_blur)
+            unet_ext = [conv_block(3,3,3,1,1,True,False), shuffle,
+                        nn.BatchNorm2d(3),
+                        conv_block(3,3,3,1,1,False,False)]
+            self.model = nn.Sequential(unet,*unet_ext)
         else:
             self.model = nn.Sequential(unet)
+
+    def set_denorm(self,denorm=True):
+        self.denorm = denorm
 
     def set_scale(self,scale):
         self.upscale_factor = scale
@@ -173,14 +183,15 @@ class SuperResUnet(Network):
             x = F.interpolate(x,scale_factor=self.upscale_factor,mode=self.inter_mode)
         x = self.model(x)
         if self.denorm:
-            x[:, 0, :, :] = x[:, 0, :, :] * self.img_std[0] + self.img_mean[0]
-            x[:, 1, :, :] = x[:, 1, :, :] * self.img_std[1] + self.img_mean[1]
-            x[:, 2, :, :] = x[:, 2, :, :] * self.img_std[2] + self.img_mean[2]
+            x = denorm_tensor(x, self.img_mean, self.img_std)
+            # x[:, 0, :, :] = x[:, 0, :, :] * self.img_std[0] + self.img_mean[0]
+            # x[:, 1, :, :] = x[:, 1, :, :] * self.img_std[1] + self.img_mean[1]
+            # x[:, 2, :, :] = x[:, 2, :, :] * self.img_std[2] + self.img_mean[2]
         
         return x
 
     def freeze_encoder(self):
-        for p in self.model[-1].encoder.parameters():
+        for p in self.model[0].encoder.parameters():
             p.requires_grad = False
 
     def compute_loss(self,outputs,labels):
@@ -204,7 +215,110 @@ class SuperResUnet(Network):
                 hr_target = hr_target.to(self.device)
                 hr_super_res = self.forward(img)
                 _,loss_dict = self.compute_loss(hr_super_res,hr_target)
-                torchvision.utils.save_image([hr_target.cpu()[0],hr_resized[0],hr_super_res.cpu()[0]],filename='current_sr_model_performance.png')
+                torchvision.utils.save_image([
+                                            #   denorm_tensor(hr_target.cpu()[0], self.img_mean, self.img_std),
+                                              hr_target.cpu()[0],
+                                              hr_resized[0],
+                                              hr_super_res.cpu()[0]
+                                              ],
+                                              filename='current_sr_model_performance.png')
+                running_psnr += 10 * math.log10(1 / loss_dict['mse'].item())
+                running_loss += loss_dict['overall_loss'].item()
+                rmse_ += rmse(hr_super_res,hr_target).cpu().numpy()
+        self.train()
+        ret = {}
+        ret['final_loss'] = running_loss/len(dataloader)
+        ret['psnr'] = running_psnr/len(dataloader)
+        ret['final_rmse'] = rmse_/len(dataloader)
+        return ret
+
+class SrNetwork(Network):
+    def __init__(self,
+                 model_name = 'resnet',
+                 model_type = 'super_res',
+                 kornia_transforms = None,
+                 lr = 0.08,
+                 upscale_factor = 4,
+                 num_blocks = 8,
+                 block_channels = 32,
+                 block_scale = 0.1,
+                 shuffle_blur = True,
+                 criterion = feature_loss.FeatureLoss(),
+                 optimizer_name = 'sgd',
+                 img_mean = [0.485, 0.456, 0.406],
+                 img_std = [0.229, 0.224, 0.225],
+                 denorm = True,
+                 device = None,
+                 best_validation_loss = None,
+                 best_psnr = None,
+                 best_model_file = 'best_sr_resnet_sgd.pth',
+                 ):
+
+        super().__init__(device=device)
+
+        self.set_scale(upscale_factor)
+        self.set_model(model_name=model_name, scale=upscale_factor, num_blocks=num_blocks,
+                       block_channels=block_channels, block_scale=block_scale, shuffle_blur=shuffle_blur)
+        self.model.to(device)
+        self.set_model_params(criterion=criterion, optimizer_name=optimizer_name, lr=lr, model_name=model_name, model_type=model_type,
+                              best_validation_loss=best_validation_loss, best_model_file=best_model_file)
+        self.best_psnr = best_psnr
+        self.img_mean = img_mean
+        self.img_std = img_std
+        self.denorm = denorm
+
+    def set_scale(self,scale):
+        self.upscale_factor = scale
+
+    def set_model(self,model_name='resnet', scale=4, num_blocks=8, block_channels=64, block_scale=0.1, shuffle_blur=True):
+        model_dict = {'resnet': sr_resnet.SrResnet, 'densenet': sr_densenet.SrDensenet}
+        assert model_name.lower() in model_dict, print(f'Please use one of "densenet" or "resnet" as your model.')
+        args = [scale, num_blocks, block_channels, block_scale, shuffle_blur]
+        self.model = model_dict[model_name.lower()](*args)
+        print(f'Super Resolution using {model_name}.')
+
+    def forward(self,x):
+        x = self.model(x)
+        if self.denorm:
+            x = denorm_tensor(x, self.img_mean, self.img_std)
+            # x[:, 0, :, :] = x[:, 0, :, :] * self.img_std[0] + self.img_mean[0]
+            # x[:, 1, :, :] = x[:, 1, :, :] * self.img_std[1] + self.img_mean[1]
+            # x[:, 2, :, :] = x[:, 2, :, :] * self.img_std[2] + self.img_mean[2]
+        return x
+
+    def freeze(self,idx):
+        for i in idx:
+            for p in self.model.features[i].parameters():
+                p.requires_grad = False
+
+    def compute_loss(self,outputs,labels):
+
+        ret = {}
+        ret['mse'] = F.mse_loss(outputs,labels)
+        loss = self.criterion(outputs, labels)
+        ret['overall_loss'] = loss
+        return loss,ret
+    
+    def evaluate(self,dataloader, **kwargs):
+        
+        running_loss = 0.
+        running_psnr = 0.
+        rmse_ = 0.
+        self.eval()
+        with torch.no_grad():
+            for data_batch in dataloader:
+                img, hr_target, hr_resized = data_batch[0],data_batch[1],data_batch[2]
+                img = img.to(self.device)
+                hr_target = hr_target.to(self.device)
+                hr_super_res = self.forward(img)
+                _,loss_dict = self.compute_loss(hr_super_res,hr_target)
+                torchvision.utils.save_image([
+                                            #   denorm_tensor(hr_target.cpu()[0], self.img_mean, self.img_std),
+                                              hr_target.cpu()[0],
+                                              hr_resized[0],
+                                              hr_super_res.cpu()[0]
+                                              ],
+                                              filename='current_sr_model_performance.png')
                 running_psnr += 10 * math.log10(1 / loss_dict['mse'].item())
                 running_loss += loss_dict['overall_loss'].item()
                 rmse_ += rmse(hr_super_res,hr_target).cpu().numpy()

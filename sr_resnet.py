@@ -1,4 +1,6 @@
+import utils
 from dai_imports import*
+from pixel_shuffle import PixelShuffle_ICNR
 
 def icnr(x, scale=2, init=nn.init.kaiming_normal_):
     new_shape = [int(x.shape[0] / (scale ** 2))] + list(x.shape[1:])
@@ -28,10 +30,8 @@ class ResSequential(nn.Module):
         x = x + self.m(x) * self.res_scale
         return x
 
-def res_block(nf):
-    return ResSequential(
-        [conv(nf, nf), conv(nf, nf, actn=False)],
-        0.1)
+def res_block(nf, res_scale=0.1):
+    return ResSequential([conv(nf, nf), conv(nf, nf, actn=False)], res_scale)
 
 def upsample(ni, nf, scale):
     layers = []
@@ -44,12 +44,18 @@ def upsample(ni, nf, scale):
 
 
 class SrResnet(nn.Module):
-    def __init__(self, scale, res_blocks = 8):
+    def __init__(self, scale=2, res_blocks=8, res_channels=32, res_scale=0.1, shuffle_blur=True):
         super().__init__()
-        features = [conv(3, 64)]
-        for _ in range(res_blocks): features.append(res_block(64))
-        features += [conv(64,64), upsample(64, 64, scale),
-                     nn.BatchNorm2d(64),
-                     conv(64, 3, actn=False)]
+        features = [conv(3, res_channels)]
+        for _ in range(res_blocks): features.append(res_block(res_channels, res_scale))
+        # shuffle = nn.Sequential(*([PixelShuffle_ICNR(res_channels, res_channels, 2, shuffle_blur)] * (int(math.log(scale,2)))))
+        shuffle = PixelShuffle_ICNR(res_channels, res_channels, scale, shuffle_blur)
+        features += [conv(res_channels,res_channels), shuffle,
+                     nn.BatchNorm2d(res_channels),
+                     conv(res_channels, 3, actn=False)]
+        # features += [PixelShuffle_ICNR(res_channels, res_channels, 2, shuffle_blur), nn.Conv2d(res_channels, 3, 3, 2)]
+        # features += [conv(res_channels,res_channels), upsample(res_channels, res_channels, scale),
+        #              nn.BatchNorm2d(res_channels),
+        #              conv(res_channels, 3, actn=False)]
         self.features = nn.Sequential(*features)        
     def forward(self, x): return self.features(x)

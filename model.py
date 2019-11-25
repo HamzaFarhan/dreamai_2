@@ -114,7 +114,7 @@ class Network(nn.Module):
         return loss
 
     def fit(self,trainloader,validloader,cycle_len=2,num_cycles=1,print_every=10,validate_every=1,save_best_every=1,clip=False,load_best=False,
-            eval_thresh=0.5,saving_crit='loss',one_cycle_upward_epochs=None):
+            eval_thresh=0.5,saving_crit='loss',one_cycle_upward_epochs=None, use_bn=True):
         epochs = cycle_len
         optim_path = Path(self.best_model_file)
         optim_path = optim_path.stem + '_optim' + optim_path.suffix
@@ -147,7 +147,7 @@ class Network(nn.Module):
                     mlflow.log_param('epochs',epochs)
                     mlflow.log_param('lr',self.optimizer.param_groups[0]['lr'])
                     mlflow.log_param('bs',trainloader.batch_size)
-                    epoch_train_loss =  self.train_((epoch,epochs),trainloader,self.optimizer,print_every,clip=clip)  
+                    epoch_train_loss =  self.train_((epoch,epochs),trainloader,self.optimizer,print_every,clip=clip, use_bn=use_bn)  
                             
                     if  validate_every and (epoch % validate_every == 0):
                         t2 = time.time()
@@ -288,10 +288,15 @@ class Network(nn.Module):
             except:
                 pass    
 
-    def train_(self,e,trainloader,optimizer,print_every,clip=False):
+    def train_(self,e,trainloader,optimizer,print_every,clip=False,use_bn=True):
 
-        epoch,epochs = e
         self.train()
+        if not use_bn:
+            self.model[0].encoder.apply(remove_bn)
+            for m in self.model[0].encoder.modules():
+                if isinstance(m,nn.Sequential):
+                    m.apply(remove_bn)
+        epoch,epochs = e
         t0 = time.time()
         t1 = time.time()
         batches = 0

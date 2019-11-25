@@ -68,8 +68,16 @@ def plot_in_row(imgs,figsize = (20,20),rows = None,columns = None,titles = [],fi
     plt.show()
     return fig
 
+def denorm_tensor(x,img_mean,img_std):
+    if x.dim() == 3:
+        x.unsqueeze_(0)
+    x[:, 0, :, :] = x[:, 0, :, :] * img_std[0] + img_mean[0]
+    x[:, 1, :, :] = x[:, 1, :, :] * img_std[1] + img_mean[1]
+    x[:, 2, :, :] = x[:, 2, :, :] * img_std[2] + img_mean[2]
+    return x
+
 def tensor_to_img(t):
-    if len(t.shape) > 3:
+    if t.dim() > 3:
         return [np.transpose(t_,(1,2,0)) for t_ in t]
     return np.transpose(t,(1,2,0))
 
@@ -128,7 +136,9 @@ class imgs_to_batch_dataset(Dataset):
             x = x.unsqueeze(0)
         return x,img_path
 
-def imgs_to_batch(data, bs, size = None, norm = False, img_mean = None, img_std = None, stats_percentage = 1., channels = 3, num_workers = 6):
+def imgs_to_batch(paths = [], bs = 1, size = None, norm = False, img_mean = None, img_std = None,
+                  stats_percentage = 1., channels = 3, num_workers = 6):
+    data = pd.Dataframe({'Images':paths})
     tfms = [AT.ToTensor()]
     if size:
         tfms.insert(0,albu.Resize(size[0],size[1],interpolation=0))        
@@ -186,11 +196,15 @@ def imgs_to_batch(data, bs, size = None, norm = False, img_mean = None, img_std 
 #         batch = batch.to(device)
 #     return batch
 
-def to_batch(paths = [],imgs = [], size = None):
+def to_batch(paths = [],imgs = [], size = None, channels=3):
     if len(paths) > 0:
         imgs = []
         for p in paths:
-            imgs.append(cv2.imread(p))
+            if channels==3:
+                img = bgr2rgb(cv2.imread(p))
+            elif channels==1:
+                img = cv2.imread(p,0)
+            imgs.append(img)
     for i,img in enumerate(imgs):
         if size:
             img = cv2.resize(img, size)
@@ -234,6 +248,12 @@ def unfreeze_model(model):
 #     if in_channels == out_channels:
 #         m.append(nn.MaxPool2d(2))
 #     return nn.Sequential(*m)
+
+def conv_block(in_channels, out_channels, kernel_size=3, stride=1, padding=1, relu=True, bn=True):
+    layers = [nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding)]
+    if relu: layers.append(nn.ReLU(True))
+    if bn: layers.append(nn.BatchNorm2d(out_channels))
+    return nn.Sequential(*layers)
 
 class WeightedMultilabel(nn.Module):
     def __init__(self, weights):
@@ -297,6 +317,11 @@ def psnr(mse):
 def get_psnr(inputs,targets):
     mse_loss = F.mse_loss(inputs,targets)
     return 10 * math.log10(1 / mse_loss)
+
+def remove_bn(s):
+    for m in s.modules():
+        if isinstance(m,nn.BatchNorm2d):
+            m.eval()
 
 def dice(input, targs, iou = False, eps = 1e-8):
     "Dice coefficient metric for binary target. If iou=True, returns iou metric, classic for segmentation problems."

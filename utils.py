@@ -125,20 +125,26 @@ class imgs_to_batch_dataset(Dataset):
         return len(self.data)
     
     def __getitem__(self, index):
-        img_path = self.data.iloc[index, 0]
-        if self.channels == 3:
-            img = utils.bgr2rgb(cv2.imread(str(img_path)))
-        else:    
-            img = cv2.imread(str(img_path),0)
+        try:
+            img_path = self.data.iloc[index, 0]
+            if self.channels == 3:
+                img = bgr2rgb(cv2.imread(str(img_path)))
+            else:    
+                img = cv2.imread(str(img_path),0)
+        except:
+            img = self.data.iloc[index, 0]
         self.tfms = albu.Compose(self.transforms_)
         x = self.tfms(image=img)['image']
         if self.channels == 1:
             x = x.unsqueeze(0)
         return x,img_path
 
-def imgs_to_batch(paths = [], bs = 1, size = None, norm = False, img_mean = None, img_std = None,
+def imgs_to_batch(paths = [], imgs = [], bs = 1, size = None, norm = False, img_mean = None, img_std = None,
                   stats_percentage = 1., channels = 3, num_workers = 6):
-    data = pd.Dataframe({'Images':paths})
+    if len(paths) > 0:
+        data = pd.Dataframe({'Images':paths})
+    elif len(imgs) > 0:
+        data = pd.Dataframe({'Images':imgs})
     tfms = [AT.ToTensor()]
     if size:
         tfms.insert(0,albu.Resize(size[0],size[1],interpolation=0))        

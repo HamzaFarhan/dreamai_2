@@ -296,7 +296,77 @@ class dai_super_res_dataset(Dataset):
         # img_ = self.downscale_transforms(image=img_)['image']
         img = self.input_transforms(image=img_)['image']
         resized_target = self.resized_target_transforms(image=img_)['image']
-        return img, target, resized_target  
+        return img, target, resized_target
+
+class dai_super_res_video_dataset(Dataset):
+
+    def __init__(self, data_dir, data, n_frames, transforms_,):
+        super(dai_super_res_dataset, self).__init__()
+        self.data_dir = data_dir
+        self.data = data
+        self.n_frames = n_frames
+        self.pre_transforms = albu.Compose(transforms_['pre_transforms'])
+        self.pre_input_transforms = albu.Compose(transforms_['pre_input_transforms'])
+        # self.downscale_transforms = albu.Compose(transforms_['downscale'])
+        self.input_transforms = albu.Compose(transforms_['input'])
+        self.target_transforms = albu.Compose(transforms_['target'])
+        self.resized_target_transforms = albu.Compose(transforms_['resized_target'])
+
+    def get_flow(self, im1, im2):
+        im1 = np.array(im1)
+        im2 = np.array(im2)
+        im1 = im1.astype(float) / 255.
+        im2 = im2.astype(float) / 255.
+        
+        # Flow Options:
+        alpha = 0.012
+        ratio = 0.75
+        minWidth = 20
+        nOuterFPIterations = 7
+        nInnerFPIterations = 1
+        nSORIterations = 30
+        colType = 0  # 0 or default:RGB, 1:GRAY (but pass gray image with shape (h,w,1))
+        
+        u, v, im2W = pyflow.coarse2fine_flow(im1, im2, alpha, ratio, minWidth, nOuterFPIterations, nInnerFPIterations,nSORIterations, colType)
+        flow = np.concatenate((u[..., None], v[..., None]), axis=2)
+        #flow = rescale_flow(flow,0,1)
+        return flow
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, index):
+        
+        img_path = os.path.join(self.data_dir,self.data.iloc[index + self.n_frames, 0])
+        try:
+            img_ = utils.bgr2rgb(cv2.imread(str(img_path)))
+        except:
+            print(img_path)
+        if len(self.pre_transforms.transforms.transforms) > 0:
+            img_ = self.pre_transforms(image=img_)['image']    
+        target = self.target_transforms(image=img_)['image']
+        if len(self.pre_input_transforms.transforms.transforms) > 0:
+            img_ = self.pre_input_transforms(image=img_)['image']   
+        # img_ = self.downscale_transforms(image=img_)['image']
+        img = self.input_transforms(image=img_)['image']
+        resized_target = self.resized_target_transforms(image=img_)['image']
+
+        seq = [os.path.join(self.data_dir,self.data.iloc[i, 0]) for i in list(reversed(range(1, self.n_frames)))]
+        neighbours = []
+        for img_path in seq:
+            try:
+                img_ = utils.bgr2rgb(cv2.imread(str(img_path)))
+            except:
+                print(img_path)
+            if len(self.pre_transforms.transforms.transforms) > 0:
+                img_ = self.pre_transforms(image=img_)['image']    
+            if len(self.pre_input_transforms.transforms.transforms) > 0:
+                img_ = self.pre_input_transforms(image=img_)['image']   
+            neighbours.append(self.input_transforms(image=img_)['image'])
+        
+        flow = [self.get_flow(img,j) for j in neighbours]
+
+        return img, target, resized_target, neighbours, flow
 
 def rescale_landmarks(landmarks,row_scale,col_scale):
     landmarks2 = copy.deepcopy(torch.Tensor(landmarks).reshape((-1,2)))
@@ -625,15 +695,19 @@ class DataProcessor:
 
         # resize_transform = transforms.Resize(s,interpolation=Image.NEAREST)
         if train_resize_transform is None:
-            train_resize_transform = albu.Resize(s[0],s[1],interpolation=1)          
-        if img_mean is None and self.img_mean is None: # and not sr:
-            # temp_tfms = [resize_transform, transforms.ToTensor()]
-            temp_tfms = [train_resize_transform, AT.ToTensor()]
-            frac_data = data_dfs[self.tr_name].sample(frac = stats_percentage).reset_index(drop=True).copy()
-            temp_dataset = dai_image_csv_dataset(data_dir = data_dir,data = frac_data,transforms_ = temp_tfms,channels = channels)
-            self.img_mean,self.img_std = get_img_stats(temp_dataset,channels)
-        elif self.img_mean is None:
-            self.img_mean,self.img_std = img_mean,img_std
+            train_resize_transform = albu.Resize(s[0],s[1],interpolation=2)
+        if normalise:          
+            if img_mean is None and self.img_mean is None: # and not sr:
+                # temp_tfms = [resize_transform, transforms.ToTensor()]
+                temp_tfms = [train_resize_transform, AT.ToTensor()]
+                frac_data = data_dfs[self.tr_name].sample(frac = stats_percentage).reset_index(drop=True).copy()
+                temp_dataset = dai_image_csv_dataset(data_dir = data_dir,data = frac_data,transforms_ = temp_tfms,channels = channels)
+                self.img_mean,self.img_std = get_img_stats(temp_dataset,channels)
+            elif self.img_mean is None:
+                self.img_mean,self.img_std = img_mean,img_std
+            normalise_transform = albu.Normalize(self.img_mean, self.img_std)
+        else:
+            normalise_transform = None
         # if obj:
         #     obj_transform = obj_utils.transform(size = s, mean = self.img_mean, std = self.img_std)
         #     dataset = dai_obj_dataset
@@ -672,27 +746,28 @@ class DataProcessor:
                             [
                                 albu.Resize((super_res_crop // super_res_upscale_factor),
                                             (super_res_crop // super_res_upscale_factor),
-                                            interpolation = 1)
+                                            interpolation = 2)
                             ],
                 'input':[
                         # albu.CenterCrop(super_res_crop,super_res_crop),
                         albu.Resize((super_res_crop // super_res_upscale_factor),
                                     (super_res_crop // super_res_upscale_factor),
-                                    interpolation = 1),
-                        albu.Normalize(self.img_mean,self.img_std),
+                                    interpolation = 2),
+                        normalise_transform,
                         AT.ToTensor()
                 ],
                 'target':[
                         # albu.CenterCrop(super_res_crop,super_res_crop),
                         # albu.Normalize(self.img_mean,self.img_std),
+                        normalise_transform,
                         AT.ToTensor()
                 ],
                 'resized_target':[
                     # albu.CenterCrop(super_res_crop,super_res_crop),
                     albu.Resize((super_res_crop // super_res_upscale_factor),
                                 (super_res_crop // super_res_upscale_factor),
-                                interpolation = 1),
-                    albu.Resize(super_res_crop,super_res_crop,interpolation = 1),
+                                interpolation = 2),
+                    albu.Resize(super_res_crop,super_res_crop,interpolation = 2),
                     # albu.OneOf([
                     #             albu.Resize(super_res_crop,super_res_crop,interpolation = 0),
                     #             albu.Resize(super_res_crop,super_res_crop,interpolation = 1),
@@ -721,7 +796,7 @@ class DataProcessor:
                         train_resize_transform,
                         # transforms.ToTensor(),
                         # transforms.Normalize(self.img_mean,self.img_std)
-                        albu.Normalize(self.img_mean,self.img_std),
+                        normalise_transform,
                         AT.ToTensor()
                     ]
             else:
@@ -729,7 +804,7 @@ class DataProcessor:
                     train_resize_transform,
                     # transforms.ToTensor(),
                     # transforms.Normalize(self.img_mean,self.img_std)
-                    albu.Normalize(self.img_mean,self.img_std),
+                    normalise_transform,
                     AT.ToTensor()
                 ]
                 tfms_temp[1:1] = tfms
@@ -738,12 +813,12 @@ class DataProcessor:
                 print(tfms)
                 print()
             if val_resize_transform is None:
-                val_resize_transform = albu.Resize(s[0],s[1],interpolation=1)
+                val_resize_transform = albu.Resize(s[0],s[1],interpolation=2)
             val_test_tfms = [
                 val_resize_transform,
                 # transforms.ToTensor(),
                 # transforms.Normalize(self.img_mean,self.img_std)
-                albu.Normalize(self.img_mean,self.img_std),
+                # normalise_transform,
                 AT.ToTensor()
             ]
             data_transforms = {

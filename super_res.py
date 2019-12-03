@@ -1,3 +1,4 @@
+import dbpn_v1
 import sr_resnet
 import sr_densenet
 from utils import *
@@ -7,6 +8,7 @@ import sr_model_loss
 from dai_imports import*
 from rdn import RDN, RDN_DN
 from pixel_shuffle import PixelShuffle_ICNR
+from dbpn_discriminator import Discriminator, FeatureExtractor, FeatureExtractorResnet
 
 class SuperRes(Network):
     def __init__(self,
@@ -328,3 +330,450 @@ class SrNetwork(Network):
         ret['psnr'] = running_psnr/len(dataloader)
         ret['final_rmse'] = rmse_/len(dataloader)
         return ret
+
+class SuperResDBPN(Network):
+    def __init__(self,
+                 model_name = 'dbpn',
+                 model_type = 'super_res',
+                 lr = 0.08,
+                 num_channels = 3,
+                 base_filter = 64,
+                 feat = 256,
+                 upscale_factor = 4, 
+                 criterion = nn.L1Loss(),
+                 img_mean = [0.485, 0.456, 0.406],
+                 img_std = [0.229, 0.224, 0.225],
+                 inter_mode = 'bicubic',
+                 residual = False,
+                 denorm = False,
+                 optimizer_name = 'adam',
+                 device = None,
+                 best_validation_loss = None,
+                 best_psnr = None,
+                 best_model_file = 'best_dbpn_sgd.pth',
+                 model_weights = None,
+                 optim_weights = None
+                 ):
+
+        super().__init__(device=device)
+
+        print(f'Super Resolution using DBPN.')
+
+        self.set_inter_mode(inter_mode)
+        self.set_scale(upscale_factor)
+        self.set_residual(residual)
+        self.set_denorm(denorm)
+        self.model = dbpn_v1.Net(num_channels=num_channels, base_filter=base_filter,
+                                 feat=feat, num_stages=10, scale_factor=upscale_factor)
+        # print(self.model.state_dict().keys())
+        if model_weights:
+            self.model.load_state_dict(model_weights)
+        modules = list(self.model.module.named_modules())
+        for n,p in modules:
+            if isinstance(p, nn.Conv2d):
+                setattr(self.model.module, n, nn.utils.weight_norm(p))
+        self.model.to(device)
+        self.set_model_params(criterion = criterion,optimizer_name = optimizer_name,lr = lr,model_name = model_name,model_type = model_type,
+                              best_validation_loss = best_validation_loss,best_model_file = best_model_file)
+        if optim_weights:
+            self.optim.load_state_dict(optim_weights)
+        self.best_psnr = best_psnr
+        self.img_mean = img_mean
+        self.img_std = img_std
+
+    def set_denorm(self,denorm=True):
+        self.denorm = denorm
+
+    def set_scale(self,scale):
+        self.upscale_factor = scale
+
+    def set_inter_mode(self,mode):
+        self.inter_mode = mode
+
+    def set_residual(self,res):
+        self.residual = res
+
+    def forward(self,x):
+        if self.inter_mode is not None:
+            res = F.interpolate(x.clone().detach(), scale_factor=self.upscale_factor, mode=self.inter_mode)
+        x = self.model(x)
+        if self.residual:
+            x += res
+        if self.denorm:
+            x = denorm_tensor(x, self.img_mean, self.img_std)
+            # x[:, 0, :, :] = x[:, 0, :, :] * self.img_std[0] + self.img_mean[0]
+            # x[:, 1, :, :] = x[:, 1, :, :] * self.img_std[1] + self.img_mean[1]
+            # x[:, 2, :, :] = x[:, 2, :, :] * self.img_std[2] + self.img_mean[2]
+        
+        return x
+
+    def compute_loss(self,outputs,labels):
+
+        ret = {}
+        ret['mse'] = F.mse_loss(outputs,labels)
+        loss = self.criterion(outputs, labels)
+        ret['overall_loss'] = loss
+        return loss,ret
+    
+    def evaluate(self,dataloader, **kwargs):
+
+        # res = self.residual
+        # self.set_residual(False)
+        running_loss = 0.
+        running_psnr = 0.
+        rmse_ = 0.
+        self.eval()
+        with torch.no_grad():
+            for data_batch in dataloader:
+                img, hr_target, hr_resized = data_batch[0],data_batch[1],data_batch[2]
+                img = img.to(self.device)
+                hr_target = hr_target.to(self.device)
+                hr_super_res = self.forward(img)
+                _,loss_dict = self.compute_loss(hr_super_res,hr_target)
+                torchvision.utils.save_image([
+                                            #   denorm_tensor(hr_target.cpu()[0], self.img_mean, self.img_std),
+                                              hr_target.cpu()[0],
+                                              hr_resized[0],
+                                              hr_super_res.cpu()[0]
+                                              ],
+                                              filename='current_sr_model_performance.png')
+                running_psnr += 10 * math.log10(1 / loss_dict['mse'].item())
+                running_loss += loss_dict['overall_loss'].item()
+                rmse_ += rmse(hr_super_res,hr_target).cpu().numpy()
+        # self.set_residual(res)
+        self.train()
+        ret = {}
+        ret['final_loss'] = running_loss/len(dataloader)
+        ret['psnr'] = running_psnr/len(dataloader)
+        ret['final_rmse'] = rmse_/len(dataloader)
+        return ret
+
+    # def predict(self,inputs,actv = None):
+    #     res = self.residual
+    #     self.set_residual(False)
+    #     self.eval()
+    #     self.model.eval()
+    #     self.model = self.model.to(self.device)
+    #     with torch.no_grad():
+    #         inputs = inputs.to(self.device)
+    #         outputs = self.forward(inputs)
+    #     if actv is not None:
+    #         return actv(outputs)
+    #     self.set_residual(res)
+    #     return outputs
+
+class SuperResDBPNGAN(Network):
+    def __init__(self,
+                 model_name = 'dbpn_gan',
+                 model_type = 'super_res',
+                 lr = 0.001,
+                 d_lr = 0.001,
+                 num_channels = 3,
+                 base_filter = 64,
+                 feat = 256,
+                 upscale_factor = 4, 
+                #  criterion = nn.MSELoss(),
+                 criterion = feature_loss.FeatureLoss(),
+                 adv_loss_weight = 1e-3,
+                 img_mean = [0.485, 0.456, 0.406],
+                 img_std = [0.229, 0.224, 0.225],
+                 denorm = False,
+                 normed_data = False,
+                 optimizer_name = 'adam',
+                 d_optimizer_name = 'adam',
+                 device = None,
+                 best_validation_loss = None,
+                 best_psnr = None,
+                 best_model_file = 'best_dbpngan_adam.pth',
+                 gen_weights = None,
+                 disc_weights = None,
+                 optim_weights = None,
+                 sr_image_size = 224
+                 ):
+
+        super().__init__(device=device)
+
+        print(f'Super Resolution using DBPN GAN.')
+
+        self.adv_loss_weight = adv_loss_weight
+        self.set_scale(upscale_factor)
+        self.set_denorm(denorm)
+        self.G = dbpn_v1.Net(num_channels=num_channels, base_filter=base_filter,
+                                 feat=feat, num_stages=10, scale_factor=upscale_factor)
+        self.D = Discriminator(num_channels=num_channels, base_filter=base_filter, image_size=sr_image_size)
+        # self.feature_loss = feature_loss
+        # self.feature_loss.set_base_loss(criterion)
+        # self.feature_extractor = FeatureExtractor(models.vgg16(pretrained=True)).to(device).eval()
+        # for p in self.feature_extractor.parameters():
+            # p.requires_grad = False
+        # print(self.model.state_dict().keys())
+        if gen_weights:
+            self.G.load_state_dict(gen_weights)
+        if disc_weights:
+            self.D.load_state_dict(disc_weights)
+        self.model = nn.ModuleDict({'G':self.G, 'D':self.D}).to(device)
+        self.set_model_params(params=self.G.parameters() ,optimizer_name=optimizer_name, lr=lr,
+                              d_params=self.D.parameters() ,d_optimizer_name=d_optimizer_name, d_lr=d_lr,
+                              criterion=criterion, model_name=model_name, model_type=model_type,
+                              best_validation_loss=best_validation_loss, best_model_file=best_model_file)
+        if optim_weights:
+            self.optim.load_state_dict(optim_weights)
+        self.best_psnr = best_psnr
+        self.img_mean = img_mean
+        self.img_std = img_std
+
+    def set_denorm(self,denorm=True):
+        self.denorm = denorm
+
+    def set_scale(self,scale):
+        self.upscale_factor = scale
+
+    def forward(self,x):
+        x = self.model.G(x)
+        if self.denorm:
+            x = denorm_tensor(x, self.img_mean, self.img_std)
+            # x[:, 0, :, :] = x[:, 0, :, :] * self.img_std[0] + self.img_mean[0]
+            # x[:, 1, :, :] = x[:, 1, :, :] * self.img_std[1] + self.img_mean[1]
+            # x[:, 2, :, :] = x[:, 2, :, :] * self.img_std[2] + self.img_mean[2]
+        
+        return x
+
+    def compute_loss(self,outputs,labels):
+
+        ret = {}
+        ret['mse'] = F.mse_loss(outputs,labels)
+        loss = self.criterion(outputs, labels)
+        ret['overall_loss'] = loss
+        return loss,ret
+    
+    def train_(self, e, trainloader, optimizer, print_every, clip=False):
+        
+        BCE_loss = nn.BCELoss()
+        G_epoch_loss = 0.
+        D_epoch_loss = 0.
+        feat_epoch_loss = 0.
+        style_epoch_loss = 0.
+        adv_epoch_loss = 0.
+        crit_epoch_loss = 0.
+        gen_epoch_loss = 0.
+
+        self.train()
+        epoch,epochs = e
+        t0 = time.time()
+        t1 = time.time()
+        batches = 0
+        for data_batch in trainloader:
+            batches += 1
+            inputs,target = data_batch[0],data_batch[1]
+            minibatch = inputs.shape[0]
+            real_label = torch.ones(minibatch).to(self.device) #torch.rand(minibatch,1)*0.5 + 0.7
+            fake_label = torch.zeros(minibatch).to(self.device) #torch.rand(minibatch,1)*0.3
+            inputs = inputs.to(self.device)
+            target = target.to(self.device)
+            # outputs = self.forward(inputs)
+            # loss = self.compute_loss(outputs,labels)[0]
+
+            # Reset gradient
+            self.d_optimizer.zero_grad()
+            
+            # Train discriminator with real data
+            D_real_decision = self.model.D(target).squeeze(1)
+            D_real_loss = BCE_loss(D_real_decision, real_label)
+            
+            # Train discriminator with fake data
+            recon_image = self.model.G(inputs)
+            D_fake_decision = self.model.D(recon_image).squeeze(1)
+            D_fake_loss = BCE_loss(D_fake_decision, fake_label)
+            
+            D_loss = D_real_loss + D_fake_loss
+            
+            # Back propagation
+            D_loss.backward()
+            self.d_optimizer.step()
+            
+            # Reset gradient
+            optimizer.zero_grad()
+            
+            # Train generator
+            recon_image = self.model.G(inputs)
+            D_fake_decision = self.model.D(recon_image).squeeze(1)
+            
+            # Adversarial loss
+            GAN_loss = self.adv_loss_weight * BCE_loss(D_fake_decision, real_label)
+            
+            gen_loss = self.criterion(recon_image, target)
+
+            # Content losses
+            # crit_loss = self.loss_weights[0] * self.criterion(recon_image, target)
+            
+            # #Perceptual loss
+            # x_VGG = target.data.clone()
+            # recon_VGG = recon_image.data.clone()
+            # real_feature = self.feature_extractor(x_VGG)
+            # fake_feature = self.feature_extractor(recon_VGG)
+            # # torch.autograd.set_detect_anomaly(True)
+            # vgg_loss = self.loss_weights[1] * sum([self.criterion(fake_feature[i], real_feature[i].detach()) for i in range(len(real_feature))])        
+            # style_loss = self.loss_weights[3] * sum([self.criterion(gram_matrix(fake_feature[i]),
+            #                                          gram_matrix(real_feature[i]).detach()) for i in range(len(real_feature))])
+
+            # # Back propagation
+            # gen_loss = crit_loss + vgg_loss + style_loss
+
+            G_loss = gen_loss + GAN_loss
+
+            G_loss.backward()
+            if clip:
+                nn.utils.clip_grad_norm_(self.model.parameters(),1.)
+            optimizer.step()
+
+            G_epoch_loss += G_loss.item()
+            D_epoch_loss += D_loss.item()
+            # feat_epoch_loss += (vgg_loss.item())
+            # style_epoch_loss += (style_loss.item())
+            adv_epoch_loss += (GAN_loss.item())
+            # crit_epoch_loss += (crit_loss.item())
+            gen_epoch_loss += (gen_loss.item())
+
+            if batches % print_every == 0:
+                elapsed = time.time()-t1
+                if elapsed > 60:
+                    elapsed /= 60.
+                    measure = 'min'
+                else:
+                    measure = 'sec'
+                batch_time = time.time()-t0
+                if batch_time > 60:
+                    batch_time /= 60.
+                    measure2 = 'min'
+                else:
+                    measure2 = 'sec'    
+                print('+----------------------------------------------------------------------+\n'
+                        f"{time.asctime().split()[-2]}\n"
+                        f"Time elapsed: {elapsed:.3f} {measure}\n"
+                        f"Epoch:{epoch+1}/{epochs}\n"
+                        f"Batch: {batches+1}/{len(trainloader)}\n"
+                        f"Batch training time: {batch_time:.3f} {measure2}\n"
+                        f"Batch training loss: {G_loss.item():.3f}\n"
+                        f"Average Descriminator loss: {D_epoch_loss/(batches):.3f}\n"
+                        f"Average Generator loss: {G_epoch_loss/(batches):.3f}\n"
+                        # f"Average feature loss: {feat_epoch_loss/(batches):.3f}\n"
+                        # f"Average style loss: {feat_epoch_loss/(batches):.3f}\n"
+                        f"Average adversarial loss: {adv_epoch_loss/(batches):.3f}\n"
+                        f"Average generator criterion loss: {gen_epoch_loss/(batches):.3f}\n"
+                        # f"Average criterion loss: {crit_epoch_loss/(batches):.3f}\n"
+                      '+----------------------------------------------------------------------+\n'     
+                        )
+                t0 = time.time()
+        return G_epoch_loss/len(trainloader)
+
+    def set_optimizer(self, params, d_params, optimizer_name='adam', lr=0.003,
+                      d_optimizer_name='adam', d_lr=0.003 ):
+        if optimizer_name:
+            optimizer_name = optimizer_name.lower()
+            if optimizer_name == 'adam':
+                print('Setting generator optimizer: Adam')
+                self.optimizer = optim.Adam(params, lr=lr, betas=(0.9, 0.999), eps=1e-8)
+                self.optimizer_name = optimizer_name
+            elif optimizer_name == 'sgd':
+                print('Setting generator optimizer: SGD')
+                self.optimizer = optim.SGD(params,lr=lr)
+                self.optimizer_name = optimizer_name
+            elif optimizer_name == 'adadelta':
+                print('Setting generator optimizer: AdaDelta')
+                # self.optimizer = optim.Adadelta(params)
+                self.optimizer = optim.Adadelta(params,lr=lr)
+                self.optimizer_name = optimizer_name
+
+            d_optimizer_name = d_optimizer_name.lower()
+            if d_optimizer_name == 'adam':
+                print('Setting discriminator optimizer: Adam')
+                self.d_optimizer = optim.Adam(d_params, lr=d_lr, betas=(0.9, 0.999), eps=1e-8)
+                self.d_optimizer_name = d_optimizer_name
+            elif d_optimizer_name == 'sgd':
+                print('Setting discriminator optimizer: SGD')
+                self.d_optimizer = optim.SGD(d_params,lr=d_lr)
+                self.d_optimizer_name = d_optimizer_name
+            elif d_optimizer_name == 'adadelta':
+                print('Setting discriminator optimizer: AdaDelta')
+                # self.optimizer = optim.Adadelta(params)
+                self.d_optimizer = optim.Adadelta(d_params,lr=d_lr)
+                self.d_optimizer_name = d_optimizer_name
+            
+    def set_model_params(self,
+                         params = None,
+                         optimizer_name = 'sgd',
+                         lr = 0.01,
+                         d_params = None,
+                         d_optimizer_name = 'sgd',
+                         d_lr = 0.01,
+                         criterion = nn.CrossEntropyLoss(),
+                         dropout_p = 0.45,
+                         model_name = 'resnet50',
+                         model_type = 'classifier',
+                         best_accuracy = 0.,
+                         best_validation_loss = None,
+                         best_model_file = 'best_model_file.pth'):        
+        if params is None:
+            params = self.G.parameters()
+        if d_params is None:
+            d_params = self.D.parameters()
+        self.set_criterion(criterion)
+        self.optimizer_name = optimizer_name
+        self.set_optimizer(params=params, optimizer_name=optimizer_name, lr=lr,
+                           d_params=d_params, d_optimizer_name=d_optimizer_name, d_lr=d_lr)
+        self.lr = lr
+        self.dropout_p = dropout_p
+        self.model_name =  model_name
+        self.model_type = model_type
+        self.best_accuracy = best_accuracy
+        self.best_validation_loss = best_validation_loss
+        self.best_model_file = best_model_file
+
+    def evaluate(self,dataloader, **kwargs):
+
+        # res = self.residual
+        # self.set_residual(False)
+        running_loss = 0.
+        running_psnr = 0.
+        rmse_ = 0.
+        self.eval()
+        with torch.no_grad():
+            for data_batch in dataloader:
+                img, hr_target, hr_resized = data_batch[0],data_batch[1],data_batch[2]
+                img = img.to(self.device)
+                hr_target = hr_target.to(self.device)
+                hr_super_res = self.forward(img)
+                # print(hr_target.shape,hr_super_res.shape, hr_resized.shape)
+                _,loss_dict = self.compute_loss(hr_super_res,hr_target)
+                torchvision.utils.save_image([
+                                            #   denorm_tensor(hr_target.cpu()[0], self.img_mean, self.img_std).squeeze(0),
+                                              hr_target.cpu()[0],
+                                              hr_resized[0],
+                                            #   denorm_tensor(hr_super_res.cpu()[0], self.img_mean, self.img_std).squeeze(0),
+                                              hr_super_res.cpu()[0]
+                                              ],
+                                              filename='current_sr_model_performance.png')
+                running_psnr += 10 * math.log10(1 / loss_dict['mse'].item())
+                running_loss += loss_dict['overall_loss'].item()
+                rmse_ += rmse(hr_super_res,hr_target).cpu().numpy()
+        # self.set_residual(res)
+        self.train()
+        ret = {}
+        ret['final_loss'] = running_loss/len(dataloader)
+        ret['psnr'] = running_psnr/len(dataloader)
+        ret['final_rmse'] = rmse_/len(dataloader)
+        return ret
+
+    # def predict(self,inputs,actv = None):
+    #     res = self.residual
+    #     self.set_residual(False)
+    #     self.eval()
+    #     self.model.eval()
+    #     self.model = self.model.to(self.device)
+    #     with torch.no_grad():
+    #         inputs = inputs.to(self.device)
+    #         outputs = self.forward(inputs)
+    #     if actv is not None:
+    #         return actv(outputs)
+    #     self.set_residual(res)
+    #     return outputs

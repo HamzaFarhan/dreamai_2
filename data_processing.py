@@ -1,4 +1,5 @@
 import utils
+import pyflow
 import obj_utils
 from dai_imports import*
 
@@ -268,7 +269,7 @@ class dai_image_dataset(Dataset):
 
 class dai_super_res_dataset(Dataset):
 
-    def __init__(self, data_dir, data, transforms_,):
+    def __init__(self, data_dir, data, transforms_, **kwargs):
         super(dai_super_res_dataset, self).__init__()
         self.data_dir = data_dir
         self.data = data
@@ -300,11 +301,11 @@ class dai_super_res_dataset(Dataset):
 
 class dai_super_res_video_dataset(Dataset):
 
-    def __init__(self, data_dir, data, n_frames, transforms_,):
-        super(dai_super_res_dataset, self).__init__()
+    def __init__(self, data_dir, data, transforms_, **kwargs):
+        super(dai_super_res_video_dataset, self).__init__()
         self.data_dir = data_dir
         self.data = data
-        self.n_frames = n_frames
+        self.n_frames = kwargs['n_frames']
         self.pre_transforms = albu.Compose(transforms_['pre_transforms'])
         self.pre_input_transforms = albu.Compose(transforms_['pre_input_transforms'])
         # self.downscale_transforms = albu.Compose(transforms_['downscale'])
@@ -317,7 +318,9 @@ class dai_super_res_video_dataset(Dataset):
         im2 = np.array(im2)
         im1 = im1.astype(float) / 255.
         im2 = im2.astype(float) / 255.
-        
+        im1 = im1.copy(order='C')
+        im2 = im2.copy(order='C')
+        # print(im1.shape, im2.shape)
         # Flow Options:
         alpha = 0.012
         ratio = 0.75
@@ -337,7 +340,8 @@ class dai_super_res_video_dataset(Dataset):
 
     def __getitem__(self, index):
         
-        img_path = os.path.join(self.data_dir,self.data.iloc[index + self.n_frames, 0])
+        frames = utils.path_list(os.path.join(self.data_dir,self.data.iloc[index, 0]), sort=True)
+        img_path = frames[self.n_frames-1]
         try:
             img_ = utils.bgr2rgb(cv2.imread(str(img_path)))
         except:
@@ -351,7 +355,7 @@ class dai_super_res_video_dataset(Dataset):
         img = self.input_transforms(image=img_)['image']
         resized_target = self.resized_target_transforms(image=img_)['image']
 
-        seq = [os.path.join(self.data_dir,self.data.iloc[i, 0]) for i in list(reversed(range(1, self.n_frames)))]
+        seq = list(reversed(frames[:-1]))
         neighbours = []
         for img_path in seq:
             try:
@@ -364,9 +368,9 @@ class dai_super_res_video_dataset(Dataset):
                 img_ = self.pre_input_transforms(image=img_)['image']   
             neighbours.append(self.input_transforms(image=img_)['image'])
         
-        flow = [self.get_flow(img,j) for j in neighbours]
+        flow = [utils.to_tensor(self.get_flow(utils.tensor_to_img(img), utils.tensor_to_img(j))) for j in neighbours]
 
-        return img, target, resized_target, neighbours, flow
+        return img, target, neighbours, flow, resized_target
 
 def rescale_landmarks(landmarks,row_scale,col_scale):
     landmarks2 = copy.deepcopy(torch.Tensor(landmarks).reshape((-1,2)))
@@ -674,7 +678,7 @@ class DataProcessor:
         return ret
         
     def get_data(self, data_dict = None, s = (224,224), dataset = dai_image_csv_dataset, train_resize_transform = None, val_resize_transform = None, 
-                 bs = 32, balance = False, super_res_crop = 256, super_res_upscale_factor = 1, sr_input_tfms = [],
+                 bs = 32, balance = False, super_res_crop = 256, super_res_upscale_factor = 1, sr_input_tfms = [], n_frames = 7,
                  tfms = [],bal_tfms = None,num_workers = 8, stats_percentage = 0.6,channels = 3, normalise = True, img_mean = None, img_std = None):
         
         self.image_size = s
@@ -776,7 +780,7 @@ class DataProcessor:
                     AT.ToTensor()
                 ]
             }
-            image_datasets = {x: dataset(data_dir,data_dfs[x],super_res_transforms)
+            image_datasets = {x: dataset(data_dir=data_dir, data=data_dfs[x], transforms_=super_res_transforms, n_frames=n_frames)
                              for x in [self.tr_name, self.val_name, self.test_name]}
 
         else:   

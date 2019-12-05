@@ -1,3 +1,4 @@
+import pyflow
 from dai_imports import*
 from data_processing import get_img_stats
 
@@ -79,7 +80,7 @@ def denorm_tensor(x,img_mean,img_std):
 def tensor_to_img(t):
     if t.dim() > 3:
         return [np.transpose(t_,(1,2,0)) for t_ in t]
-    return np.transpose(t,(1,2,0))
+    return np.array(np.transpose(t,(1,2,0)))
 
 def smooth_labels(labels,eps=0.1):
     if len(labels.shape) > 1:
@@ -88,6 +89,29 @@ def smooth_labels(labels,eps=0.1):
         length = len(labels)
     labels = labels * (1 - eps) + (1-labels) * eps / (length - 1)
     return labels
+
+def get_flow(self, im1, im2):
+
+    im1 = np.array(im1)
+    im2 = np.array(im2)
+    im1 = im1.astype(float) / 255.
+    im2 = im2.astype(float) / 255.
+    im1 = im1.copy(order='C')
+    im2 = im2.copy(order='C')
+    # print(im1.shape, im2.shape)
+    # Flow Options:
+    alpha = 0.012
+    ratio = 0.75
+    minWidth = 20
+    nOuterFPIterations = 7
+    nInnerFPIterations = 1
+    nSORIterations = 30
+    colType = 0  # 0 or default:RGB, 1:GRAY (but pass gray image with shape (h,w,1))
+    
+    u, v, im2W = pyflow.coarse2fine_flow(im1, im2, alpha, ratio, minWidth, nOuterFPIterations, nInnerFPIterations,nSORIterations, colType)
+    flow = np.concatenate((u[..., None], v[..., None]), axis=2)
+    #flow = rescale_flow(flow,0,1)
+    return flow
 
 # def get_img_stats(dataset,tfms,channels,sz=1.):
 
@@ -111,6 +135,10 @@ def smooth_labels(labels,eps=0.1):
 #     print('Done')
 #     return imgs_mean,imgs_std
 
+def to_tensor(x):
+    t = AT.ToTensorV2()
+    return t(image=x)['image']
+
 class imgs_to_batch_dataset(Dataset):
     
     def __init__(self, data, transforms_ = None, channels = 3):
@@ -132,29 +160,30 @@ class imgs_to_batch_dataset(Dataset):
             else:    
                 img = cv2.imread(str(img_path),0)
         except:
-            img = self.data.iloc[index, 0]
+            img = np.array(self.data.iloc[index, 0])
         self.tfms = albu.Compose(self.transforms_)
         x = self.tfms(image=img)['image']
         if self.channels == 1:
             x = x.unsqueeze(0)
+        x = x.unsqueeze(0)
         return x,img_path
 
 def imgs_to_batch(paths = [], imgs = [], bs = 1, size = None, norm = False, img_mean = None, img_std = None,
                   stats_percentage = 1., channels = 3, num_workers = 6):
     if len(paths) > 0:
-        data = pd.Dataframe({'Images':paths})
+        data = pd.DataFrame({'Images':paths})
     elif len(imgs) > 0:
-        data = pd.Dataframe({'Images':imgs})
+        data = pd.DataFrame({'Images':imgs})
     tfms = [AT.ToTensor()]
-    if size:
-        tfms.insert(0,albu.Resize(size[0],size[1],interpolation=0))        
     if norm:
         if img_mean is None:
             norm_tfms = albu.Compose(tfms)
             frac_data = data.sample(frac = stats_percentage).reset_index(drop=True).copy()
             temp_dataset = imgs_to_batch_dataset(data = frac_data, transforms_ = norm_tfms, channels = channels)
             img_mean,img_std = get_img_stats(temp_dataset,channels)
-        tfms.insert(1,albu.Normalize(img_mean,img_std))
+        tfms.insert(0,albu.Normalize(img_mean,img_std))
+    if size:
+        tfms.insert(0,albu.Resize(size[0],size[1],interpolation=0))        
     tfms = albu.Compose(tfms)
     image_dataset = imgs_to_batch_dataset(data = data, transforms_ = tfms, channels = channels)
     if size is None:
@@ -320,6 +349,9 @@ DAI_AvgPool = nn.AdaptiveAvgPool2d(1)
 def flatten_tensor(x):
     return x.view(x.shape[0],-1)
 
+def flatten_list(l):
+    return sum(l, [])
+
 def rmse(inputs,targets):
     return torch.sqrt(torch.mean((inputs - targets) ** 2))
 
@@ -436,113 +468,113 @@ def process_landmarks(lm):
             landmarks+=(list(sum(marks,())))
     return landmarks,check
 
-def is_confused_or_wrong(p,l,wrong_th=0.65):
-    for i in range(len(p)):
-        if ((abs(l[i].item() - p[i].item()) > wrong_th) or (p[i].item() >= 0.4 and p[i].item() <= 0.6)):
-            return True
-    return False
+# def is_confused_or_wrong(p,l,wrong_th=0.65):
+#     for i in range(len(p)):
+#         if ((abs(l[i].item() - p[i].item()) > wrong_th) or (p[i].item() >= 0.4 and p[i].item() <= 0.6)):
+#             return True
+#     return False
 
-def get_confused_or_wrong_names(preds,labels,names,wrong_th=0.65):
-    retrain = []
-    for i,p in enumerate(preds):
-        label,name = labels[i],names[i]
-        if is_confused_or_wrong(p,label,wrong_th):
-            retrain.append(name)
-    return retrain
+# def get_confused_or_wrong_names(preds,labels,names,wrong_th=0.65):
+#     retrain = []
+#     for i,p in enumerate(preds):
+#         label,name = labels[i],names[i]
+#         if is_confused_or_wrong(p,label,wrong_th):
+#             retrain.append(name)
+#     return retrain
 
-def is_confused(p):
-    for x in p:
-        if (x.item() >= 0.4 and x.item() <= 0.6):
-            return True
-    return False
+# def is_confused(p):
+#     for x in p:
+#         if (x.item() >= 0.4 and x.item() <= 0.6):
+#             return True
+#     return False
 
-def is_wrong(p,l,wrong_th=0.65):
-    for x,y in zip(l,p):
-        if (abs(x.item() - y.item()) > wrong_th):
-            return True
-    return False
+# def is_wrong(p,l,wrong_th=0.65):
+#     for x,y in zip(l,p):
+#         if (abs(x.item() - y.item()) > wrong_th):
+#             return True
+#     return False
 
-def get_wrong(preds,labels,names,wrong_th=0.65):
-    retrain = []
-    for i,p in enumerate(preds):
-        label,name = labels[i],names[i]
-        if is_wrong(p,label,wrong_th):
-            retrain.append(name)
-    return retrain
+# def get_wrong(preds,labels,names,wrong_th=0.65):
+#     retrain = []
+#     for i,p in enumerate(preds):
+#         label,name = labels[i],names[i]
+#         if is_wrong(p,label,wrong_th):
+#             retrain.append(name)
+#     return retrain
 
-def get_confused(preds,labels,names):
-    retrain = []
-    for p,name in zip(preds,names):
-        if is_confused(p):
-            retrain.append(name)
-    return retrain
+# def get_confused(preds,labels,names):
+#     retrain = []
+#     for p,name in zip(preds,names):
+#         if is_confused(p):
+#             retrain.append(name)
+#     return retrain
 
-def get_random_retrain(retrain,names):
-    for n in names:
-        if random.random() > 0.1 and n not in retrain:
-            retrain.append(n)
-    return retrain
+# def get_random_retrain(retrain,names):
+#     for n in names:
+#         if random.random() > 0.1 and n not in retrain:
+#             retrain.append(n)
+#     return retrain
 
-def get_retrain(model,loader,wrong_th=0.65):
-    retrain = []
-    for batch in loader:
-        preds,labels,names = torch.sigmoid(model.predict(batch[0])),batch[1],batch[2]
-        retrain += get_random_retrain(get_confused_or_wrong_names(preds,labels,names,wrong_th),names)
-    return retrain
+# def get_retrain(model,loader,wrong_th=0.65):
+#     retrain = []
+#     for batch in loader:
+#         preds,labels,names = torch.sigmoid(model.predict(batch[0])),batch[1],batch[2]
+#         retrain += get_random_retrain(get_confused_or_wrong_names(preds,labels,names,wrong_th),names)
+#     return retrain
 
-def get_wrong_class(preds,labels,names,class_idx,wrong_th=0.75):
-    retrain = []
-    for i,pred in enumerate(preds):
-        label,name = labels[i],names[i]
-        if ((label[class_idx].item() - pred[class_idx].item()) > wrong_th):
-            retrain.append(name)
-    return retrain
+# def get_wrong_class(preds,labels,names,class_idx,wrong_th=0.75):
+#     retrain = []
+#     for i,pred in enumerate(preds):
+#         label,name = labels[i],names[i]
+#         if ((label[class_idx].item() - pred[class_idx].item()) > wrong_th):
+#             retrain.append(name)
+#     return retrain
 
-def get_retrain_wrong_class(model,loader,class_idx,wrong_th=0.75):
-    retrain = []
-    for batch in loader:
-        preds,labels,names = torch.sigmoid(model.predict(batch[0])),batch[1],batch[2]
-        retrain += get_wrong_class(preds,labels,names,class_idx,wrong_th)
-    return retrain
+# def get_retrain_wrong_class(model,loader,class_idx,wrong_th=0.75):
+#     retrain = []
+#     for batch in loader:
+#         preds,labels,names = torch.sigmoid(model.predict(batch[0])),batch[1],batch[2]
+#         retrain += get_wrong_class(preds,labels,names,class_idx,wrong_th)
+#     return retrain
 
-def get_confused_class(preds,names,class_idx):
-    retrain = []
-    for name,pred in zip(names,preds):
-        if pred[class_idx].item() >= 0.4 and pred[class_idx].item() <= 0.6:
-            retrain.append(name)
-    return retrain
+# def get_confused_class(preds,names,class_idx):
+#     retrain = []
+#     for name,pred in zip(names,preds):
+#         if pred[class_idx].item() >= 0.4 and pred[class_idx].item() <= 0.6:
+#             retrain.append(name)
+#     return retrain
 
-def get_retrain_confused_class(model,loader,class_idx):
-    retrain = []
-    for batch in loader:
-        preds,names = torch.sigmoid(model.predict(batch[0])),batch[2]
-        retrain += get_confused_class(preds,names,class_idx)
-    return retrain
+# def get_retrain_confused_class(model,loader,class_idx):
+#     retrain = []
+#     for batch in loader:
+#         preds,names = torch.sigmoid(model.predict(batch[0])),batch[2]
+#         retrain += get_confused_class(preds,names,class_idx)
+#     return retrain
 
-def get_all_zeros(preds,names):
-    retrain = []
-    for name,pred in zip(names,preds):
-        if sum(pred).item() == 0:
-            retrain.append(name)
-    return retrain
+# def get_all_zeros(preds,names):
+#     retrain = []
+#     for name,pred in zip(names,preds):
+#         if sum(pred).item() == 0:
+#             retrain.append(name)
+#     return retrain
 
-def get_retrain_all_zeros(model,loader):
-    retrain = []
-    for batch in loader:
-        preds,names = torch.sigmoid(model.predict(batch[0])),batch[2]
-        retrain += get_all_zeros(preds,names)
-    return retrain
+# def get_retrain_all_zeros(model,loader):
+#     retrain = []
+#     for batch in loader:
+#         preds,names = torch.sigmoid(model.predict(batch[0])),batch[2]
+#         retrain += get_all_zeros(preds,names)
+#     return retrain
 
-def get_class(labels,names,class_idx):
-    retrain = []
-    for label,name in zip(labels,names):
-        if label[class_idx] == 1:
-            retrain.append(name)
-    return retrain
+# def get_class(labels,names,class_idx):
+#     retrain = []
+#     for label,name in zip(labels,names):
+#         if label[class_idx] == 1:
+#             retrain.append(name)
+#     return retrain
 
-def get_retrain_class(loader,class_idx):
-    retrain = []
-    for batch in loader:
-        labels,names = batch[1],batch[2]
-        retrain += get_class(labels,names,class_idx)
-    return retrain
+# def get_retrain_class(loader,class_idx):
+#     retrain = []
+#     for batch in loader:
+#         labels,names = batch[1],batch[2]
+#         retrain += get_class(labels,names,class_idx)
+#     return retrain

@@ -113,14 +113,17 @@ class Network(nn.Module):
         loss = self.compute_loss(outputs,labels)[0]
         return loss
 
-    def fit(self,trainloader,validloader,cycle_len=2,num_cycles=1,print_every=10,validate_every=1,save_best_every=1,clip=False,load_best=False,
-            eval_thresh=0.5,saving_crit='loss',one_cycle_upward_epochs=None, use_bn=True):
+    def fit(self,trainloader,validloader,cycle_len=2,num_cycles=1,max_lr=1.,print_every=10,
+            validate_every=1,save_best_every=1,clip=False,load_best=False,
+            eval_thresh=0.5,saving_crit='loss',one_cycle_upward_epochs=None):
+        # os.makedirs('saved_weights', exist_ok=True)
+        weights_folder = Path('saved_weights')
         epochs = cycle_len
         optim_path = Path(self.best_model_file)
         optim_path = optim_path.stem + '_optim' + optim_path.suffix
         lr = self.optimizer.param_groups[0]['lr']
         if one_cycle_upward_epochs is not None:
-            max_lr = min(1.,lr*10)
+            max_lr = min(max_lr,lr*10)
             start_lr = lr/100
             last_lr = lr/1000
             upward_epochs = one_cycle_upward_epochs
@@ -147,7 +150,7 @@ class Network(nn.Module):
                     mlflow.log_param('epochs',epochs)
                     mlflow.log_param('lr',self.optimizer.param_groups[0]['lr'])
                     mlflow.log_param('bs',trainloader.batch_size)
-                    epoch_train_loss =  self.train_((epoch,epochs),trainloader,self.optimizer,print_every,clip=clip, use_bn=use_bn)  
+                    epoch_train_loss =  self.train_((epoch,epochs),trainloader,self.optimizer,print_every,clip=clip)  
                             
                     if  validate_every and (epoch % validate_every == 0):
                         t2 = time.time()
@@ -193,16 +196,21 @@ class Network(nn.Module):
                                 print('******************************************\n')
                                 self.best_accuracy = epoch_accuracy
                                 mlflow.log_metric('Best Accuracy',self.best_accuracy)
-                                optim_path = Path(self.best_model_file)
-                                optim_path = optim_path.stem + '_optim' + optim_path.suffix
-                                torch.save(self.model.state_dict(),self.best_model_file)
-                                torch.save(self.optimizer.state_dict(),optim_path)     
-                                mlflow.pytorch.log_model(self,'mlflow_logged_models')
-                                curr_time = str(datetime.now())
-                                curr_time = '_'+curr_time.split()[1].split('.')[0]
-                                mlflow_save_path = Path('mlflow_saved_training_models')/\
-                                    (Path(self.best_model_file).stem+'_{}_{}'.format(str(round(epoch_accuracy,2)),str(epoch+1)+curr_time))
-                                mlflow.pytorch.save_model(self,mlflow_save_path)
+                                
+                                best_model_path, optim_path = self.save_model(epoch_accuracy, epoch+1, weights_folder,
+                                mlflow_saved_folder='mlflow_saved_training_models', mlflow_logged_folder='mlflow_logged_models')
+
+                                # curr_time = str(datetime.now())
+                                # curr_time = '_'+curr_time.split()[1].split('.')[0]
+                                # suff = Path(self.best_model_file).suffix
+                                # best_model_file = Path(self.best_model_file).stem+f'_{str(round(epoch_accuracy,2))}_{str(epoch+1)+curr_time}'
+                                # best_model_path = weights_folder/(best_model_file + suff)
+                                # optim_path = weights_folder/(best_model_file + '_optim' + suff)
+                                # torch.save(self.model.state_dict(), best_model_path)
+                                # torch.save(self.optimizer.state_dict(),optim_path)     
+                                # mlflow.pytorch.log_model(self,'mlflow_logged_models')
+                                # mlflow_save_path = Path('mlflow_saved_training_models')/best_model_file
+                                # mlflow.pytorch.save_model(self,mlflow_save_path)
                         else:
                             if self.model_type == 'multi_label_classifier':
                                 epoch_accuracy = eval_dict['accuracy']
@@ -228,16 +236,20 @@ class Network(nn.Module):
                                     print('*'*49+'\n')
                                     self.best_validation_loss = epoch_validation_loss
                                     mlflow.log_metric('Best Loss',self.best_validation_loss)
-                                    optim_path = Path(self.best_model_file)
-                                    optim_path = optim_path.stem + '_optim' + optim_path.suffix
-                                    torch.save(self.model.state_dict(),self.best_model_file)
-                                    torch.save(self.optimizer.state_dict(),optim_path)     
-                                    mlflow.pytorch.log_model(self,'mlflow_logged_models')
-                                    curr_time = str(datetime.now())
-                                    curr_time = '_'+curr_time.split()[1].split('.')[0]
-                                    mlflow_save_path = Path('mlflow_saved_training_models')/\
-                                        (Path(self.best_model_file).stem+'_{}_{}'.format(str(round(epoch_validation_loss,3)),str(epoch+1)+curr_time))
-                                    mlflow.pytorch.save_model(self,mlflow_save_path)
+
+                                    best_model_path, optim_path = self.save_model(epoch_validation_loss, epoch+1, weights_folder,
+                                    mlflow_saved_folder='mlflow_saved_training_models', mlflow_logged_folder='mlflow_logged_models')
+
+                                    # optim_path = Path(self.best_model_file)
+                                    # optim_path = optim_path.stem + '_optim' + optim_path.suffix
+                                    # torch.save(self.model.state_dict(),self.best_model_file)
+                                    # torch.save(self.optimizer.state_dict(),optim_path)     
+                                    # mlflow.pytorch.log_model(self,'mlflow_logged_models')
+                                    # curr_time = str(datetime.now())
+                                    # curr_time = '_'+curr_time.split()[1].split('.')[0]
+                                    # mlflow_save_path = Path('mlflow_saved_training_models')/\
+                                    #     (Path(self.best_model_file).stem+'_{}_{}'.format(str(round(epoch_validation_loss,3)),str(epoch+1)+curr_time))
+                                    # mlflow.pytorch.save_model(self,mlflow_save_path)
                             elif saving_crit == 'psnr':
                                 if self.best_psnr == None or (epoch_psnr >= self.best_psnr):
                                     print('\n**********Updating best psnr**********\n')
@@ -247,16 +259,20 @@ class Network(nn.Module):
                                     print('*'*49+'\n')
                                     self.best_psnr = epoch_psnr
                                     mlflow.log_metric('Best Psnr',self.best_psnr)
-                                    optim_path = Path(self.best_model_file)
-                                    optim_path = optim_path.stem + '_optim' + optim_path.suffix
-                                    torch.save(self.model.state_dict(),self.best_model_file)
-                                    torch.save(self.optimizer.state_dict(),optim_path)     
-                                    mlflow.pytorch.log_model(self,'mlflow_logged_models')
-                                    curr_time = str(datetime.now())
-                                    curr_time = '_'+curr_time.split()[1].split('.')[0]
-                                    mlflow_save_path = Path('mlflow_saved_training_models')/\
-                                        (Path(self.best_model_file).stem+'_{}_{}'.format(str(round(epoch_psnr,3)),str(epoch+1)+curr_time))
-                                    mlflow.pytorch.save_model(self,mlflow_save_path)
+
+                                    best_model_path, optim_path = self.save_model(epoch_psnr, epoch+1, weights_folder,
+                                    mlflow_saved_folder='mlflow_saved_training_models', mlflow_logged_folder='mlflow_logged_models')
+
+                                    # optim_path = Path(self.best_model_file)
+                                    # optim_path = optim_path.stem + '_optim' + optim_path.suffix
+                                    # torch.save(self.model.state_dict(),self.best_model_file)
+                                    # torch.save(self.optimizer.state_dict(),optim_path)     
+                                    # mlflow.pytorch.log_model(self,'mlflow_logged_models')
+                                    # curr_time = str(datetime.now())
+                                    # curr_time = '_'+curr_time.split()[1].split('.')[0]
+                                    # mlflow_save_path = Path('mlflow_saved_training_models')/\
+                                    #     (Path(self.best_model_file).stem+'_{}_{}'.format(str(round(epoch_psnr,3)),str(epoch+1)+curr_time))
+                                    # mlflow.pytorch.save_model(self,mlflow_save_path)
                             elif saving_crit == 'accuracy':
                                 if self.best_accuracy == 0. or (epoch_accuracy >= self.best_accuracy):
                                     print('\n**********Updating best accuracy**********\n')
@@ -265,37 +281,36 @@ class Network(nn.Module):
                                     print('******************************************\n')
                                     self.best_accuracy = epoch_accuracy
                                     mlflow.log_metric('Best Accuracy',self.best_accuracy)
-                                    optim_path = Path(self.best_model_file)
-                                    optim_path = optim_path.stem + '_optim' + optim_path.suffix
-                                    torch.save(self.model.state_dict(),self.best_model_file)
-                                    torch.save(self.optimizer.state_dict(),optim_path)     
-                                    mlflow.pytorch.log_model(self,'mlflow_logged_models')
-                                    curr_time = str(datetime.now())
-                                    curr_time = '_'+curr_time.split()[1].split('.')[0]
-                                    mlflow_save_path = Path('mlflow_saved_training_models')/\
-                                        (Path(self.best_model_file).stem+'_{}_{}'.format(str(round(epoch_accuracy,2)),str(epoch+1)+curr_time))
-                                    mlflow.pytorch.save_model(self,mlflow_save_path)
+
+                                    best_model_path, optim_path = self.save_model(epoch_accuracy, epoch+1, weights_folder,
+                                    mlflow_saved_folder='mlflow_saved_training_models', mlflow_logged_folder='mlflow_logged_models')
+
+                                    # optim_path = Path(self.best_model_file)
+                                    # optim_path = optim_path.stem + '_optim' + optim_path.suffix
+                                    # torch.save(self.model.state_dict(),self.best_model_file)
+                                    # torch.save(self.optimizer.state_dict(),optim_path)     
+                                    # mlflow.pytorch.log_model(self,'mlflow_logged_models')
+                                    # curr_time = str(datetime.now())
+                                    # curr_time = '_'+curr_time.split()[1].split('.')[0]
+                                    # mlflow_save_path = Path('mlflow_saved_training_models')/\
+                                    #     (Path(self.best_model_file).stem+'_{}_{}'.format(str(round(epoch_accuracy,2)),str(epoch+1)+curr_time))
+                                    # mlflow.pytorch.save_model(self,mlflow_save_path)
 
                         self.train()
         torch.cuda.empty_cache()
         if load_best:
             try:
                 print('\nLoaded best model\n')
-                self.model.load_state_dict(torch.load(self.best_model_file))
+                self.model.load_state_dict(torch.load(best_model_path))
                 self.optimizer.load_state_dict(torch.load(optim_path))
-                os.remove(self.best_model_file)
-                os.remove(optim_path)
+                # os.remove(self.best_model_file)
+                # os.remove(optim_path)
             except:
                 pass    
 
-    def train_(self,e,trainloader,optimizer,print_every,clip=False,use_bn=True):
+    def train_(self, e, trainloader, optimizer, print_every, clip=False):
 
         self.train()
-        if not use_bn:
-            self.model[0].encoder.apply(remove_bn)
-            for m in self.model[0].encoder.modules():
-                if isinstance(m,nn.Sequential):
-                    m.apply(remove_bn)
         epoch,epochs = e
         t0 = time.time()
         t1 = time.time()
@@ -600,7 +615,7 @@ class Network(nn.Module):
             optimizer_name = optimizer_name.lower()
             if optimizer_name == 'adam':
                 print('Setting optimizer: Adam')
-                self.optimizer = optim.Adam(params,lr=lr)
+                self.optimizer = optim.Adam(params, lr=lr, betas=(0.9, 0.999), eps=1e-8)
                 self.optimizer_name = optimizer_name
             elif optimizer_name == 'sgd':
                 print('Setting optimizer: SGD')
@@ -650,6 +665,26 @@ class Network(nn.Module):
         params['best_model_file'] = self.best_model_file
         return params
     
+    def save_model(self, crit='', epoch='', weights_folder=Path('weights_folder'),
+                   mlflow_saved_folder='mlflow_saved_training_models', mlflow_logged_folder='mlflow_logged_models'):
+        os.makedirs(weights_folder, exist_ok=True)
+        if type(epoch) != str:
+            epoch = str(epoch)
+        if type(crit) != str:
+            crit = str(round(crit,3))
+        curr_time = str(datetime.now())
+        curr_time = '_'+curr_time.split()[1].split('.')[0]
+        suff = Path(self.best_model_file).suffix
+        best_model_file = Path(self.best_model_file).stem+f'_{crit}_{epoch+curr_time}'
+        best_model_path = weights_folder/(best_model_file + suff)
+        optim_path = weights_folder/(best_model_file + '_optim' + suff)
+        torch.save(self.model.state_dict(), best_model_path)
+        torch.save(self.optimizer.state_dict(),optim_path)     
+        mlflow.pytorch.log_model(self,mlflow_logged_folder)
+        mlflow_save_path = Path(mlflow_saved_folder)/best_model_file
+        mlflow.pytorch.save_model(self,mlflow_save_path)
+        return best_model_path, optim_path
+
     def parallelize(self):
         self.parallel = True
         self.model = DataParallelModel(self.model)

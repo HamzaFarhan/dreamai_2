@@ -2,6 +2,7 @@
 
 import torch
 import torchvision
+from torch import mm
 import torch.nn as nn
 import torch.optim as optim
 import torch.tensor as tensor

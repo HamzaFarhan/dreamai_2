@@ -372,6 +372,37 @@ class dai_super_res_video_dataset(Dataset):
 
         return img, target, neighbours, flow, resized_target
 
+class dai_super_res_video_inference(Dataset):
+
+    def __init__(self, frames, n_frames):
+        super(dai_super_res_video_inference, self).__init__()
+        self.frames = np.array(frames)
+        self.n_frames = n_frames
+
+    def __len__(self):
+        return len(self.frames)
+
+    def __getitem__(self, index):
+
+        if index < self.n_frames:
+            index = self.n_frames-1
+        in_frame = self.frames[index]
+        indexes = list(range(index-(self.n_frames-1), index))
+        # print(indexes)
+
+        neighbours = list(self.frames[indexes])
+        neighbours = [utils.to_tensor(n.astype(float)/255.) for n in neighbours]
+        flow = [utils.to_tensor(utils.get_flow(in_frame, n)) for n in neighbours]
+        in_frame = utils.to_tensor(in_frame)
+
+        return in_frame, neighbours, flow
+#         video_frames.append(np.clip(utils.tensor_to_img(net.enhance(in_frame,
+#                                                         neighbours, flow).squeeze(0).cpu()), 0., 1.))
+        
+#         in_frame = utils.to_tensor(in_frame).unsqueeze(0)
+#         neighbours = [utils.to_tensor(n).unsqueeze(0) for n in neighbours]
+#         flow = [utils.to_tensor(f).unsqueeze(0) for f in flow]
+
 def rescale_landmarks(landmarks,row_scale,col_scale):
     landmarks2 = copy.deepcopy(torch.Tensor(landmarks).reshape((-1,2)))
     for lm in landmarks2:

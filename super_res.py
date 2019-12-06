@@ -394,6 +394,9 @@ class SuperResDBPN(Network):
     def set_residual(self,res):
         self.residual = res
 
+    def enlarge(self, x):
+        return self.predict(x)
+
     def forward(self,x):
         if self.inter_mode is not None:
             res = F.interpolate(x.clone().detach(), scale_factor=self.upscale_factor, mode=self.inter_mode)
@@ -491,6 +494,7 @@ class SuperResRBPN(Network):
 
         print(f'Super Resolution using RBPN.')
 
+        self.set_frames(n_frames)
         self.set_scale(upscale_factor)
         self.set_denorm(denorm)
         self.model = rbpn.Net(num_channels=num_channels, base_filter=base_filter,feat=feat, num_stages=3,
@@ -516,6 +520,9 @@ class SuperResRBPN(Network):
 
     def set_scale(self,scale):
         self.upscale_factor = scale
+
+    def set_frames(self, n_frames):
+        self.n_frames = n_frames
 
     def forward(self,x, n, f):
         x = self.model(x, n, f)
@@ -545,6 +552,17 @@ class SuperResRBPN(Network):
         outputs = self.forward(inputs, neighbours, flow)
         loss = self.compute_loss(outputs,target)[0]
         return loss
+    
+    def enlarge(self, inputs, neighbours, flow):
+        self.eval()
+        self.model.eval()
+        self.model = self.model.to(self.device)
+        with torch.no_grad():
+            inputs = inputs.to(self.device).float()
+            neighbours = [n.to(self.device).float() for n in neighbours]
+            flow = [f.to(self.device).float() for f in flow]
+            outputs = self.forward(inputs, neighbours, flow)
+        return outputs
 
     def evaluate(self,dataloader, **kwargs):
 

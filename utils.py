@@ -90,7 +90,7 @@ def smooth_labels(labels,eps=0.1):
     labels = labels * (1 - eps) + (1-labels) * eps / (length - 1)
     return labels
 
-def get_flow(self, im1, im2):
+def get_flow(im1, im2):
 
     im1 = np.array(im1)
     im2 = np.array(im2)
@@ -137,6 +137,8 @@ def get_flow(self, im1, im2):
 
 def to_tensor(x):
     t = AT.ToTensorV2()
+    if type(x) == list:
+        return [t(image=i)['image'] for i in x]
     return t(image=x)['image']
 
 class imgs_to_batch_dataset(Dataset):
@@ -284,12 +286,6 @@ def unfreeze_model(model):
     for param in model.parameters():
         param.requires_grad = True
 
-# class conv_block(in_channels,out_channels,kernel,stride,padding,relu):
-#     m = [nn.Conv2d(in_channels,out_channels,kernel_size=5,padding=2),nn.PReLU()]
-#     if in_channels == out_channels:
-#         m.append(nn.MaxPool2d(2))
-#     return nn.Sequential(*m)
-
 def conv_block(in_channels, out_channels, kernel_size=3, stride=1, padding=1, relu=True, bn=True):
     layers = [nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding)]
     if relu: layers.append(nn.ReLU(True))
@@ -401,31 +397,44 @@ def gram_matrix(input):
     # by dividing by the number of element in each feature maps.
     return G.div(a * b * c * d)
 
-def save_frames(video_path, num_frames = None, output_path = '', frame_name = ''):
+def get_frames(video_path, num_frames = None):
 
-    if len(frame_name) == 0:
-        frame_name = Path(video_path).name[:-4]
-    vs = cv2.VideoCapture(video_path)
+    vs = cv2.VideoCapture(str(video_path))
     frame_number = 0
     frames = []
     while True:  
         if num_frames:
             if frame_number >= num_frames:
                 break
-        # Grab a frame from the video stream
         (grabbed, frame) = vs.read()
         if grabbed:
             frame_number+=1
-        # If the frame was not grabbed, then we have reached the end of the video
         if not grabbed:
             break
         frame = bgr2rgb(frame)
-        frames.append(frame)
-        if len(output_path) > 0:
-            os.makedirs(output_path,exist_ok=True)
-            plt.imsave(Path(output_path)/(frame_name+'_frame_{}.png'.format(frame_number)),frame)
+        frames.append(frame.astype(float)/255.)
     vs.release()
     return frames
+
+def save_imgs(imgs, dest_path = '', img_name = ''):
+
+    if len(frame_name) == 0:
+        frame_name = 'frame'
+    dest_path = Path(dest_path)
+    os.makedirs(dest_path,exist_ok=True)
+    for i,img in enumerate(imgs):
+        plt.imsave(str(dest_path/f'{frame_name}_{i}.png'), img)
+
+def frames_to_vid(frames, output_path, fps=30):
+
+    height, width, _ = frames[0].shape
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v') # Be sure to use lower case
+    out = cv2.VideoWriter(str(output_path), fourcc, fps, (width, height))
+
+    for frame in frames:
+        out.write(bgr2rgb(np.uint8(frame*255)))
+    out.release()
+    # print("The output video is {}".format(output))
 
 def expand_rect(left,top,right,bottom,H,W, margin = 15):
     if top >= margin:

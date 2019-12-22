@@ -6,7 +6,7 @@ from dai_imports import*
 class dai_image_csv_dataset(Dataset):
     
     def __init__(self, data_dir, data, transforms_ = None, obj = False, seg = False,
-                    minorities = None, diffs = None, bal_tfms = None, channels = 3):
+                    minorities = None, diffs = None, bal_tfms = None, channels = 3, **kwargs):
         super(dai_image_csv_dataset, self).__init__()
         self.data_dir = data_dir
         self.data = data
@@ -243,28 +243,32 @@ class dai_image_csv_dataset_landmarks(Dataset):
 
 class dai_image_dataset(Dataset):
 
-    def __init__(self, data_dir, data_df, input_transforms = None, target_transforms = None):
+    def __init__(self, data_dir, data, input_transforms=None, target_transforms=None, **kwargs):
         super(dai_image_dataset, self).__init__()
         self.data_dir = data_dir
-        self.data_df = data_df
+        self.data = data
         self.input_transforms = None
         self.target_transforms = None
         if input_transforms:
-            self.input_transforms = transforms.Compose(input_transforms)
+            self.input_transforms = albu.Compose(input_transforms)
         if target_transforms:    
-            self.target_transforms = transforms.Compose(target_transforms)
+            self.target_transforms = albu.Compose(target_transforms)
 
     def __len__(self):
-        return len(self.data_df)
+        return len(self.data)
 
     def __getitem__(self, index):
         img_path = os.path.join(self.data_dir,self.data.iloc[index, 0])
         img = utils.bgr2rgb(cv2.imread(str(img_path)))
-        target = utils.bgr2rgb(cv2.imread(str(img_path)))
+        try:
+            img_path_2 = os.path.join(self.data_dir,self.data.iloc[index, 1])
+            target = utils.bgr2rgb(cv2.imread(str(img_path_2)))
+        except:
+            target = utils.bgr2rgb(cv2.imread(str(img_path)))
         if self.input_transforms:
-            img = self.input_transforms(img)
+            img = self.input_transforms(image=img)['image']
         if self.target_transforms:
-            target = self.target_transforms(target)
+            target = self.target_transforms(image=target)['image']
         return img, target
 
 class dai_super_res_dataset(Dataset):
@@ -498,20 +502,27 @@ def load_obj(path):
 
 class DataProcessor:
     
-    def __init__(self, data_path = None, train_csv = None, val_csv = None,test_csv = None, class_names = [], seg = False, obj = False, sr = False,
-                 multi_label=False,multi_head = False,tr_name = 'train', val_name = 'val', test_name = 'test', extension = None, setup_data = True):
+    def __init__(self, data_path=None, train_csv=None, val_csv=None, test_csv=None,
+                 tr_name='train', val_name='val', test_name='test',
+                 class_names=[], extension=None, setup_data=True, **kwargs):
+
         
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         
         (self.data_path,self.train_csv,self.val_csv,self.test_csv,
          self.tr_name,self.val_name,self.test_name,self.extension) = (data_path,train_csv,val_csv,test_csv,
                                                                       tr_name,val_name,test_name,extension)
-        self.seg = seg
-        self.obj = obj
-        self.sr = sr
-        self.multi_head = multi_head
-        self.multi_label = multi_label
-        self.single_label = False
+
+        data_type = {'seg':False, 'obj':False, 'sr':False, 'enhance':False,
+                          'multi_head':False, 'multi_label':False, 'single_label':False}
+        self.data_type = dict(data_type, **kwargs)
+        self.seg = self.data_type['seg']
+        self.obj = self.data_type['obj']
+        self.sr = self.data_type['sr']
+        self.enhance = self.data_type['enhance']
+        self.multi_head = self.data_type['multi_head']
+        self.multi_label = self.data_type['multi_label']
+        self.single_label = self.data_type['single_label']
         self.img_mean = self.img_std = None
         self.data_dir,self.num_classes,self.class_names = data_path,len(class_names),class_names
         if setup_data:
@@ -564,6 +575,8 @@ class DataProcessor:
             print('\nObject Detection\n')
         elif self.sr:
             print('\nSuper Resolution\n')
+        elif self.enhance:
+            print('\nImage Enhancement\n')
         else:
             if self.multi_head:
                 print('\nMulti-head Classification\n')
@@ -682,10 +695,9 @@ class DataProcessor:
         if self.single_label:
             self.minorities,self.class_diffs = get_minorities(train_df)
         self.data_dfs = {self.tr_name:train_df, self.val_name:val_df, self.test_name:test_df}
-        data_dict = {'data_dfs':self.data_dfs,'data_dir':self.data_dir,'num_classes':self.num_classes,'class_names':self.class_names,
-                    # 'num_multi_classes':self.num_multi_classes,'multi_class_names':self.multi_class_names,
-                    'minorities':self.minorities,'class_diffs':self.class_diffs,'seg':self.seg,'obj':self.obj,'sr':self.sr,
-                    'single_label':self.single_label,'multi_label':self.multi_label}
+        data_dict = dict({'data_dfs':self.data_dfs, 'data_dir':self.data_dir,
+                          'num_classes':self.num_classes, 'class_names':self.class_names},
+                          **self.data_type)
         self.data_dict = data_dict
         return data_dict
 
@@ -715,9 +727,9 @@ class DataProcessor:
         self.image_size = s
         if not data_dict:
             data_dict = self.data_dict
-        data_dfs,data_dir,minorities,class_diffs,single_label,seg,obj,sr = (data_dict['data_dfs'],data_dict['data_dir'],
-                                                        data_dict['minorities'],data_dict['class_diffs'],
-                                                        data_dict['single_label'],data_dict['seg'],data_dict['obj'],data_dict['sr'])
+        data_dfs, data_dir, single_label, seg, obj, sr= (data_dict['data_dfs'], data_dict['data_dir'],
+                                                         data_dict['single_label'], data_dict['seg'],
+                                                         data_dict['obj'], data_dict['sr'])
         if not single_label:
            balance = False                                                 
         if not bal_tfms:
@@ -835,15 +847,16 @@ class DataProcessor:
                         AT.ToTensor()
                     ]
             else:
-                tfms_temp = [
+                tfms = [
                     train_resize_transform,
+                    *tfms,
                     # transforms.ToTensor(),
                     # transforms.Normalize(self.img_mean,self.img_std)
                     normalise_transform,
                     AT.ToTensor()
                 ]
-                tfms_temp[1:1] = tfms
-                tfms = tfms_temp
+                # tfms_temp[1:1] = tfms
+                # tfms = tfms_temp
                 print('Transforms: ',)
                 print(tfms)
                 print()
@@ -873,15 +886,14 @@ class DataProcessor:
                                             transforms_ = data_transforms[x],channels = channels)
                             for x in [self.tr_name, self.val_name, self.test_name]}
             else:
-                image_datasets = {x: dataset(data_dir = data_dir,data = data_dfs[x],
-                                            transforms_ = data_transforms[x],channels = channels,seg = seg)
+                image_datasets = {x: dataset(data_dir=data_dir, data=data_dfs[x], transforms_=data_transforms[x],
+                                             input_transforms=data_transforms[x], target_transforms=data_transforms[x],
+                                             channels=channels, seg=seg)
                             for x in [self.tr_name, self.val_name, self.test_name]}
         
-        dataloaders = {x: DataLoader(image_datasets[x], batch_size=bs,
-                                                    shuffle=True, num_workers=num_workers)
-                    for x in [self.tr_name, self.val_name, self.test_name]}
+        dataloaders = {x: DataLoader(image_datasets[x], batch_size=bs, shuffle=True, num_workers=num_workers)
+                       for x in [self.tr_name, self.val_name, self.test_name]}
         dataset_sizes = {x: len(image_datasets[x]) for x in [self.tr_name, self.val_name, self.test_name]}
-        
         self.image_datasets,self.dataloaders,self.dataset_sizes = (image_datasets,dataloaders,dataset_sizes)
         
         return image_datasets,dataloaders,dataset_sizes

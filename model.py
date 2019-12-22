@@ -221,7 +221,7 @@ class Network(nn.Module):
                                     class_acc = eval_dict['class_accuracies']
                                     for cl,ac in class_acc:
                                         print(f'{cl} accuracy: {ac:.4f}')
-                            elif self.model_type == 'super_res':
+                            elif self.model_type == 'super_res' or self.model_type == 'enhancement':
                                 epoch_psnr = eval_dict['psnr']
                                 mlflow.log_metric('Validation PSNR',epoch_psnr)
                                 print("Validation psnr: {:.3f}".format(epoch_psnr))

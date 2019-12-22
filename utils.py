@@ -49,6 +49,18 @@ def rgb2gray(img):
 def bgra2rgb(img):
     return cv2.cvtColor(img,cv2.COLOR_BGRA2RGB)
 
+def img_float_to_int(img):
+    return np.clip((np.array(img)*255).astype(np.uint8),0,255)
+
+def img_int_to_float(img):
+    return np.clip((np.array(img)/255).astype(np.float),0.,1.)
+
+def adjust_lightness(color, amount=1.2):
+    color = img_int_to_float(color)
+    c = colorsys.rgb_to_hls(*color)
+    c = np.array(colorsys.hls_to_rgb(c[0], max(0, min(1, amount * c[1])), c[2]))
+    return img_float_to_int(c)
+
 def plot_in_row(imgs,figsize = (20,20),rows = None,columns = None,titles = [],fig_path = 'fig.png',cmap = None):
     fig=plt.figure(figsize=figsize)
     if len(titles) == 0:
@@ -112,28 +124,6 @@ def get_flow(im1, im2):
     flow = np.concatenate((u[..., None], v[..., None]), axis=2)
     #flow = rescale_flow(flow,0,1)
     return flow
-
-# def get_img_stats(dataset,tfms,channels,sz=1.):
-
-#     print('Calculating mean and std of the data for standardization. Might take some time, depending on the data size.')
-
-#     size = int(len(dataset)*sz)
-#     imgs = []
-#     for i,img in enumerate(dataset):
-#         if i > size:
-#             break
-#         img = tfms(image=img)['image']
-#         if channels == 1:
-#             img.unsqueeze_(0)
-#         imgs.append(img)
-#     imgs_ = torch.stack(imgs,dim=3)
-#     imgs_ = imgs_.view(channels,-1)
-#     imgs_mean = imgs_.mean(dim=1)
-#     imgs_std = imgs_.std(dim=1)
-#     del imgs
-#     del imgs_
-#     print('Done')
-#     return imgs_mean,imgs_std
 
 def to_tensor(x):
     t = AT.ToTensorV2()
@@ -397,14 +387,17 @@ def gram_matrix(input):
     # by dividing by the number of element in each feature maps.
     return G.div(a * b * c * d)
 
-def get_frames(video_path, num_frames = None):
+def get_frames(video_path, start = None, stop = None):
 
+    if start is None:
+        start = 0
     vs = cv2.VideoCapture(str(video_path))
-    frame_number = 0
+    vs.set(cv2.CAP_PROP_POS_FRAMES, start)
+    frame_number = start
     frames = []
     while True:  
-        if num_frames:
-            if frame_number >= num_frames:
+        if stop is not None:
+            if frame_number >= stop:
                 break
         (grabbed, frame) = vs.read()
         if grabbed:
@@ -413,28 +406,144 @@ def get_frames(video_path, num_frames = None):
             break
         frame = bgr2rgb(frame)
         frames.append(frame.astype(float)/255.)
+    frames = frames[start:]
     vs.release()
     return frames
 
 def save_imgs(imgs, dest_path = '', img_name = ''):
 
-    if len(frame_name) == 0:
-        frame_name = 'frame'
+    if len(img_name) == 0:
+        img_name = 'img'
     dest_path = Path(dest_path)
-    os.makedirs(dest_path,exist_ok=True)
+    os.makedirs(dest_path, exist_ok=True)
     for i,img in enumerate(imgs):
-        plt.imsave(str(dest_path/f'{frame_name}_{i}.png'), img)
+        plt.imsave(str(dest_path/f'{img_name}_{i}.png'), img)
 
-def frames_to_vid(frames, output_path, fps=30):
+def frames_to_vid(frames=[], frames_folder='', output_path='', fps=30):
 
-    height, width, _ = frames[0].shape
+    os.makedirs(Path(output_path).absolute().parent, exist_ok=True)
+    if len(frames) == 0:
+        frames_path = path_list(Path(frames_folder))
+        first_frame = bgr2rgb(cv2.imread(str(frames_path[0])))
+        height, width, _ = first_frame[0].shape
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v') # Be sure to use lower case
+        out = cv2.VideoWriter(str(output_path), fourcc, fps, (width, height))
+        for frame_path in frames_path:
+            frame = bgr2rgb(cv2.imread(str(frame_path)))
+            out.write(bgr2rgb(np.uint8(frame*255)))
+        out.release()
+    else:
+        height, width, _ = frames[0].shape
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v') # Be sure to use lower case
+        out = cv2.VideoWriter(str(output_path), fourcc, fps, (width, height))
+
+        for frame in frames:
+            out.write(bgr2rgb(np.uint8(frame*255)))
+        out.release()
+
+def split_video(video_path, start=0, stop=None, output_path='split_video.mp4', fps=30):
+
+    os.makedirs(Path(output_path).absolute().parent, exist_ok=True)
+    if start is None:
+        start = 0
+    vs = cv2.VideoCapture(str(video_path))
+    vs.set(cv2.CAP_PROP_POS_FRAMES, start)
+    (grabbed, frame) = vs.read()
+    height, width, _ = frame.shape
     fourcc = cv2.VideoWriter_fourcc(*'mp4v') # Be sure to use lower case
     out = cv2.VideoWriter(str(output_path), fourcc, fps, (width, height))
 
-    for frame in frames:
+    frame_number = start
+    while True:  
+        if stop is not None:
+            if frame_number >= stop:
+                break
+        (grabbed, frame) = vs.read()
+        if grabbed:
+            frame_number+=1
+        if not grabbed:
+            break
+        frame = bgr2rgb(frame).astype(float)/255.
         out.write(bgr2rgb(np.uint8(frame*255)))
     out.release()
-    # print("The output video is {}".format(output))
+    vs.release()
+
+def add_text(img, text, x_factor=2, y_factor=2, font=cv2.FONT_HERSHEY_SIMPLEX, scale=5.,
+                color='white', thickness=10):
+    color = color_to_rgb(color)
+    textsize = cv2.getTextSize(text, font, scale, thickness)[0]
+    textX = ((img.shape[1] - textsize[0]) // x_factor)
+    textY = img.shape[0] - (((img.shape[0] - textsize[1]) // y_factor))
+    img = cv2.putText(img, text, (textX, textY), font, scale, color, thickness)
+    return img
+
+def add_text_pil(img, text=['DreamAI'], x=None, y=None, font='verdana', font_size=None,
+                 color='white', stroke_width=0, stroke_fill='blue', align='center'):
+
+    if type(text) == str:
+        text = [text]
+    x_,y_ = x,y
+    img = Image.fromarray(img)
+    for i,txt in enumerate(text):
+        if font_size is None:
+            font_size = img.size[1]
+            s = img.size
+            while sum(np.array(s) < img.size) < 2:
+                font_size -= int(img.size[1]/10)
+                fnt = ImageFont.truetype(get_font(font), font_size)
+                d = ImageDraw.Draw(img)
+                s = fnt.getsize(txt)
+        else:
+            fnt = ImageFont.truetype(get_font(font), font_size)
+            d = ImageDraw.Draw(img)
+            s = fnt.getsize(txt)
+        # stroke_width = font_size//30
+        offset = i * int(s[1]*1.5)
+        if x_ is None:
+            x = (img.size[0]//2) - (s[0]//2)
+        if y_ is None:
+            y = (img.size[1]//2) - (s[1]//2) - (s[1]*(len(text)-1)) + offset
+        d.text((x, y), txt, font=fnt, fill=color, align=align, stroke_width=stroke_width, stroke_fill=stroke_fill)
+    img = np.array(img)
+    return img
+
+def remove_from_list(l, r):
+    for x in r:
+        if x in l:
+            l.remove(x)
+    return l
+
+def num_common(l1, l2):
+    return len(list(set(l1).intersection(set(l2))))
+
+def max_n(l, n=3):
+    a = np.array(l)
+    idx = heapq.nlargest(n, range(len(a)), a.take)
+    return idx, a[idx]
+
+def k_dominant_colors(img, k):
+
+    img = img.reshape((img.shape[0] * img.shape[1], 3))
+    clt = KMeans(n_clusters = k)
+    clt.fit(img)
+    return clt.cluster_centers_
+
+def solid_color_img(shape=(300,300,3), color='black'):
+    image = np.zeros(shape, np.uint8)
+    color = color_to_rgb(color)
+    image[:] = color
+    return image
+
+def color_to_rgb(color):
+    if type(color) == str:
+        return np.array(colors.to_rgb(color)).astype(int)*255
+    return color
+
+def get_font(font):
+    fonts = [f.fname for f in matplotlib.font_manager.fontManager.ttflist if font.lower() in f.name.lower()]
+    if len(fonts) == 0:
+        print(f'"{font.capitalize()}" font not found.')
+    return fonts[0]
 
 def expand_rect(left,top,right,bottom,H,W, margin = 15):
     if top >= margin:
@@ -461,6 +570,13 @@ def path_list(path,sort = False):
 
 def sorted_paths(path,reverse = True):
     return sorted(path_list(path),key = lambda x: x.stat().st_ctime, reverse=reverse)
+
+def end_of_path(p, n=2):
+    parts = p.parts
+    p = Path(parts[-n])
+    for i in range(-(n-1), 0):
+        p/=parts[i]
+    return p
 
 def process_landmarks(lm):
     lm_keys = ['chin', 'left_eyebrow', 'right_eyebrow', 'nose_bridge', 'nose_tip',

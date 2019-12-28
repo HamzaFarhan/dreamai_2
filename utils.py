@@ -34,6 +34,16 @@ def denorm_img_general(inp,mean=None,std=None):
     inp = np.clip(inp, 0., 1.)
     return inp 
 
+def img_on_bg(img, bg, x_factor=1/2, y_factor=1/2):
+
+    img_h, img_w = img.shape[:2]
+    background = Image.fromarray(bg)
+    bg_w, bg_h = background.size
+    offset = (int((bg_w - img_w) * x_factor), int((bg_h - img_h) * y_factor))
+    background.paste(Image.fromarray(img), offset)
+    img = np.array(background)
+    return img
+
 def bgr2rgb(img):
     return cv2.cvtColor(img,cv2.COLOR_BGR2RGB)
 
@@ -60,6 +70,10 @@ def adjust_lightness(color, amount=1.2):
     c = colorsys.rgb_to_hls(*color)
     c = np.array(colorsys.hls_to_rgb(c[0], max(0, min(1, amount * c[1])), c[2]))
     return img_float_to_int(c)
+
+def albu_resize(img, h, w, interpolation=1):
+    rz = albu.Resize(h, w, interpolation)
+    return rz(image=img)['image']
 
 def plot_in_row(imgs,figsize = (20,20),rows = None,columns = None,titles = [],fig_path = 'fig.png',cmap = None):
     fig=plt.figure(figsize=figsize)

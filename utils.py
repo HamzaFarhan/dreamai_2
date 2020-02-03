@@ -554,9 +554,10 @@ def color_to_rgb(color):
     return color
 
 def get_font(font):
-    fonts = [f.fname for f in matplotlib.font_manager.fontManager.ttflist if font.lower() in f.name.lower()]
+    fonts = [f.fname for f in matplotlib.font_manager.fontManager.ttflist if ((font.lower() in f.name.lower()) and not ('italic' in f.name.lower()))]
     if len(fonts) == 0:
         print(f'"{font.capitalize()}" font not found.')
+        fonts = [f.fname for f in matplotlib.font_manager.fontManager.ttflist if (('serif' in f.name.lower()) and not ('italic' in f.name.lower()))]
     return fonts[0]
 
 def expand_rect(left,top,right,bottom,H,W, margin = 15):

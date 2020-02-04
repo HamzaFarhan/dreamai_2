@@ -1,7 +1,7 @@
-import utils
-import pyflow
-import obj_utils
-from dai_imports import*
+from dreamai import utils
+from dreamai import pyflow
+from dreamai import obj_utils
+from dreamai.dai_imports import*
 
 class dai_image_csv_dataset(Dataset):
     

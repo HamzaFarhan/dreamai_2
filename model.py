@@ -1,7 +1,7 @@
-import parallel
-from utils import *
-from dai_imports import *
-from parallel import DataParallelModel, DataParallelCriterion
+from dreamai.utils import *
+from dreamai import parallel
+from dreamai.dai_imports import *
+from dreamai.parallel import DataParallelModel, DataParallelCriterion
 
 class Classifier():
     def __init__(self,class_names):

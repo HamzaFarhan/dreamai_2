@@ -1,6 +1,6 @@
-from dai_imports import*
-from utils import *
-from model import *
+from dreamai.dai_imports import*
+from dreamai.utils import *
+from dreamai.model import *
 
 class FC(Network):
     def __init__(self,

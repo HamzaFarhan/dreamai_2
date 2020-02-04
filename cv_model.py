@@ -1,15 +1,15 @@
-import SSD
-import SSD300
-import obj_utils
-from fc import *
-from model import *
-from utils import *
-from dai_imports import*
-from lenet_plus import LeNetPlus
-from center_loss import CenterLoss
-from seg_hrnet import get_seg_model
-from efficientnet import EfficientNet
-from parallel import DataParallelModel, DataParallelCriterion
+from dreamai import SSD
+from dreamai import SSD300
+from dreamai import obj_utils
+from dreamai.fc import *
+from dreamai.model import *
+from dreamai.utils import *
+from dreamai.dai_imports import*
+from dreamai.lenet_plus import LeNetPlus
+from dreamai.center_loss import CenterLoss
+from dreamai.seg_hrnet import get_seg_model
+from dreamai.efficientnet import EfficientNet
+from dreamai.parallel import DataParallelModel, DataParallelCriterion
 
 class FoodIngredients(Network):
     def __init__(self,

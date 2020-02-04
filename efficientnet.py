@@ -2,7 +2,7 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
-from efficientnet_utils import relu_fn,round_filters,round_repeats,drop_connect,get_same_padding_conv2d,\
+from dreamai.efficientnet_utils import relu_fn,round_filters,round_repeats,drop_connect,get_same_padding_conv2d,\
                                get_model_params,efficientnet_params,load_pretrained_weights
 
 class MBConvBlock(nn.Module):

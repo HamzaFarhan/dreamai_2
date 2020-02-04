@@ -1,4 +1,4 @@
-from dai_imports import*
+from dreamai.dai_imports import*
 
 def conv(in_channels,out_channels):
     m = [nn.Conv2d(in_channels,out_channels,kernel_size=5,padding=2),nn.PReLU()]

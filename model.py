@@ -1,7 +1,7 @@
-import parallel
-from utils import *
-from dai_imports import *
-from parallel import DataParallelModel, DataParallelCriterion
+from dreamai.utils import *
+from dreamai import parallel
+from dreamai.dai_imports import *
+from dreamai.parallel import DataParallelModel, DataParallelCriterion
 
 class Classifier():
     def __init__(self,class_names):
@@ -221,7 +221,7 @@ class Network(nn.Module):
                                     class_acc = eval_dict['class_accuracies']
                                     for cl,ac in class_acc:
                                         print(f'{cl} accuracy: {ac:.4f}')
-                            elif self.model_type == 'super_res':
+                            elif self.model_type == 'super_res' or self.model_type == 'enhancement':
                                 epoch_psnr = eval_dict['psnr']
                                 mlflow.log_metric('Validation PSNR',epoch_psnr)
                                 print("Validation psnr: {:.3f}".format(epoch_psnr))

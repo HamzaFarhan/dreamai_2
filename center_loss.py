@@ -1,4 +1,4 @@
-from dai_imports import*
+from dreamai.dai_imports import*
 from torch.autograd.function import Function
 
 class CenterLoss(nn.Module):

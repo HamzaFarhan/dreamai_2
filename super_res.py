@@ -928,3 +928,98 @@ class SuperResDBPNGAN(Network):
     #         return actv(outputs)
     #     self.set_residual(res)
     #     return outputs
+
+class Unet(Network):
+    def __init__(self,
+                 model_name = 'resnet34',
+                 model_type = 'enhancement',
+                 kornia_transforms = None,
+                 lr = 0.08,
+                 criterion = nn.L1Loss(),
+                 encoder_depth = 5,
+                 decoder_channels = (256, 128, 64, 32, 16),
+                 upsample = 'transpose',
+                 shuffle_blur = True,
+                 use_bn = False,
+                 optimizer_name = 'sgd',
+                 device = None,
+                 best_validation_loss = None,
+                 best_psnr = None,
+                 best_model_file = 'best_enhancer_sgd.pth',
+                 encoder_weights = 'imagenet',
+                 model_weights = None,
+                 optim_weights = None,
+                 weight_norm = False,
+                 ):
+
+        super().__init__(device=device)
+
+        print(f'Using U-Net with {model_name} encoder.')
+
+        # self.setup_model(model_name, encoder_weights, encoder_depth, decoder_channels, use_bn)
+        # self.model = smp.Unet(encoder_name=model_name, encoder_weights=encoder_weights, classes=3, upsample=upsample,
+        #                       shuffle_blur=shuffle_blur, decoder_channels=decoder_channels, decoder_use_batchnorm=use_bn).to(device)
+        self.model = smp.Unet(encoder_name=model_name, encoder_weights=encoder_weights, classes=3,
+                              encoder_depth=encoder_depth, decoder_channels=decoder_channels, decoder_use_batchnorm=use_bn)
+        if model_weights:
+            self.model.load_state_dict(model_weights)
+        if weight_norm:
+            modules = list(self.model.named_modules())
+            for n,p in modules:
+                if isinstance(p, nn.Conv2d):
+                    setattr(self.model, n, nn.utils.weight_norm(p))
+        self.model.to(device)
+        self.set_model_params(criterion=criterion, optimizer_name=optimizer_name, lr=lr, 
+                              model_name=model_name, model_type=model_type,
+                              best_validation_loss=best_validation_loss, best_model_file=best_model_file)
+        if optim_weights:
+            self.optim.load_state_dict(optim_weights)
+        self.best_psnr = best_psnr
+
+    def setup_model(self, model_name='resnext50_32x4d', encoder_weights='imagenet',
+                    encoder_depth=8, decoder_channels=[256, 128, 128, 64, 64, 32, 32, 16], use_bn=False):
+        # self.model = smp.Unet(encoder_name=model_name, encoder_weights=encoder_weights, classes=3, decoder_use_batchnorm=use_bn)
+        self.model = smp.Unet(encoder_name=model_name, encoder_weights=encoder_weights, classes=3, 
+                              encoder_depth=encoder_depth, decoder_channels=decoder_channels, decoder_use_batchnorm=use_bn)
+        
+    def freeze_encoder(self):
+        for p in self.model.encoder.parameters():
+            p.requires_grad = False
+
+    def compute_loss(self,outputs,labels):
+
+        ret = {}
+        ret['mse'] = F.mse_loss(outputs,labels)
+        loss = self.criterion(outputs, labels)
+        ret['overall_loss'] = loss
+        return loss,ret
+    
+    def evaluate(self,dataloader, **kwargs):
+        
+        running_loss = 0.
+        running_psnr = 0.
+        rmse_ = 0.
+        self.eval()
+        with torch.no_grad():
+            for data_batch in dataloader:
+                img, hr_target = data_batch[0],data_batch[1]
+                img = img.to(self.device)
+                hr_target = hr_target.to(self.device)
+                enahnced_img = self.forward(img)
+                _,loss_dict = self.compute_loss(enahnced_img, hr_target)
+                torchvision.utils.save_image([
+                                              hr_target.cpu()[0],
+                                              img[0].cpu(),
+                                              enahnced_img.cpu()[0]
+                                              ],
+                                              filename='current_enhancement_performance.png')
+                running_psnr += 10 * math.log10(1 / loss_dict['mse'].item())
+                running_loss += loss_dict['overall_loss'].item()
+                rmse_ += rmse(enahnced_img,hr_target).cpu().numpy()
+        self.train()
+        ret = {}
+        ret['final_loss'] = running_loss/len(dataloader)
+        ret['psnr'] = running_psnr/len(dataloader)
+        ret['final_rmse'] = rmse_/len(dataloader)
+        return ret
+

@@ -1,6 +1,6 @@
-import utils
-from obj_utils import*
-from dai_imports import*
+from dreamai import utils
+from dreamai.obj_utils import*
+from dreamai.dai_imports import*
 
 # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 

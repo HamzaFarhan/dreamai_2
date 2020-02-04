@@ -7,7 +7,7 @@
 # from __future__ import print_function
 
 # import os
-from dai_imports import*
+from dreamai.dai_imports import*
 import functools
 
 BN_MOMENTUM = 0.01

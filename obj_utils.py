@@ -1,4 +1,4 @@
-from dai_imports import*
+from dreamai.dai_imports import*
 
 # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 

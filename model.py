@@ -665,8 +665,9 @@ class Network(nn.Module):
         params['best_model_file'] = self.best_model_file
         return params
     
-    def save_model(self, crit='', epoch='', weights_folder=Path('weights_folder'),
+    def save_model(self, crit='', epoch='', weights_folder='weights_folder',
                    mlflow_saved_folder='mlflow_saved_training_models', mlflow_logged_folder='mlflow_logged_models'):
+        weights_folder = Path(weights_folder)
         os.makedirs(weights_folder, exist_ok=True)
         if type(epoch) != str:
             epoch = str(epoch)

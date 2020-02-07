@@ -1,5 +1,6 @@
 from dreamai import pyflow
 from dreamai.dai_imports import*
+from dreamai.util_classes import*
 from dreamai.data_processing import get_img_stats
 
 def display_img_actual_size(im_data,title = ''):

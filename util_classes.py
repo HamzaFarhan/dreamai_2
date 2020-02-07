@@ -21,6 +21,7 @@ class imgs_to_batch_dataset(Dataset):
             else:    
                 img = cv2.imread(str(img_path),0)
         except:
+            img_path = ''
             img = np.array(self.data.iloc[index, 0])
         self.tfms = albu.Compose(self.transforms_)
         x = self.tfms(image=img)['image']

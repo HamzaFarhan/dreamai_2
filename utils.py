@@ -268,6 +268,18 @@ def conv_block(in_channels, out_channels, kernel_size=3, stride=1, padding=1, re
     if bn: layers.append(nn.BatchNorm2d(out_channels))
     return nn.Sequential(*layers) 
 
+def cnn_input(o,k,s,p):
+    return ((o*s)-s)+k-(2*p) 
+
+def cnn_output(w,k,s,p):
+    return np.floor(((w-k+(2*p))/s))+1
+
+def cnn_stride(w,o,k,p):
+    return np.floor((w-k+(2*p))/(o-1))
+
+def cnn_padding(w,o,k,s):
+    return np.floor((((o*s)-s)-w+k)/2 )
+
 DAI_AvgPool = nn.AdaptiveAvgPool2d(1)
 
 def flatten_tensor(x):

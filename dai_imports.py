@@ -32,13 +32,13 @@ import skimage
 import logging
 import pathlib
 import colorsys
+import itertools
 import matplotlib
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
 from math import sqrt
 import mlflow.pytorch
-# import face_recognition
 from scipy import stats
 from pathlib import Path
 from ast import literal_eval
@@ -52,6 +52,7 @@ from torchsummary import summary
 from os.path import isfile, join
 from sklearn.cluster import KMeans
 import xml.etree.ElementTree as ET
+from collections import OrderedDict
 from collections import defaultdict
 from PIL import ImageDraw, ImageFont
 from skimage.util import img_as_ubyte

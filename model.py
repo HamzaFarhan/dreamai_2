@@ -113,9 +113,9 @@ class Network(nn.Module):
         loss = self.compute_loss(outputs,labels)[0]
         return loss
 
-    def fit(self,trainloader,validloader,cycle_len=2,num_cycles=1,max_lr=1.,print_every=10,
-            validate_every=1,save_best_every=1,clip=False,load_best=False,
-            eval_thresh=0.5,saving_crit='loss',one_cycle_upward_epochs=None):
+    def fit(self, trainloader, validloader, cycle_len=2, num_cycles=1, max_lr=1., print_every=10,
+            validate_every=1, save_best_every=1, clip=False, load_best=False,
+            eval_thresh=0.5, saving_crit='loss', one_cycle_upward_epochs=None):
         # os.makedirs('saved_weights', exist_ok=True)
         weights_folder = Path('saved_weights')
         epochs = cycle_len
@@ -150,7 +150,8 @@ class Network(nn.Module):
                     mlflow.log_param('epochs',epochs)
                     mlflow.log_param('lr',self.optimizer.param_groups[0]['lr'])
                     mlflow.log_param('bs',trainloader.batch_size)
-                    epoch_train_loss =  self.train_((epoch,epochs),trainloader,self.optimizer,print_every,clip=clip)  
+                    epoch_train_loss =  self.train_((epoch,epochs), trainloader, optimizer=self.optimizer,
+                                                     print_every=print_every ,clip=clip)  
                             
                     if  validate_every and (epoch % validate_every == 0):
                         t2 = time.time()
@@ -308,9 +309,11 @@ class Network(nn.Module):
             except:
                 pass    
 
-    def train_(self, e, trainloader, optimizer, print_every, clip=False):
+    def train_(self, e, trainloader, optimizer=None, print_every=10, clip=False):
 
         self.train()
+        if optimizer is None:
+            optimizer = self.optimizer
         epoch,epochs = e
         t0 = time.time()
         t1 = time.time()
@@ -665,6 +668,14 @@ class Network(nn.Module):
         params['best_model_file'] = self.best_model_file
         return params
     
+    def set_requires_grad(self, nets, requires_grad=False):
+        if not isinstance(nets, list):
+            nets = [nets]
+        for net in nets:
+            if net is not None:
+                for param in net.parameters():
+                    param.requires_grad = requires_grad
+
     def save_model(self, crit='', epoch='', weights_folder='weights_folder',
                    mlflow_saved_folder='mlflow_saved_training_models', mlflow_logged_folder='mlflow_logged_models'):
         weights_folder = Path(weights_folder)

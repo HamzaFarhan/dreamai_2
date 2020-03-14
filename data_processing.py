@@ -550,8 +550,8 @@ class DataProcessor:
             #         test_csv = test_name+'.csv'
             # else:
             train_csv,val_csv,test_csv = self.data_from_paths_to_csv(data_path,tr_path,val_path,test_path)
-        else:
-            self.data_dir = tr_path
+        # else:
+        #     self.data_dir = tr_path
 
         train_csv_path = os.path.join(data_path,train_csv)
         train_df = pd.read_csv(train_csv_path)

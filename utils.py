@@ -544,6 +544,24 @@ def process_landmarks(lm):
             landmarks+=(list(sum(marks,())))
     return landmarks,check
 
+def greater_2_power(x):
+    return 1<<(x-1).bit_length()
+
+def pad(img, size=(256,256,3), value=1):
+    padded = np.ones(size, dtype=np.uint8)*np.uint8(value)
+    pad_h, pad_w = size[:2]
+    img_h, img_w = img.shape[:2]
+    offset_h = (pad_h-img_h)//2
+    offset_w = (pad_w-img_w)//2
+    padded[offset_h:img_h+offset_h, offset_w:img_w+offset_w] = img
+    return padded
+
+def remove_pad(img, shape=(256,256)):
+    img_h, img_w = img.shape[:2]
+    pad_h, pad_w = (img_h-shape[0])//2, (img_w-shape[1])//2
+    print(pad_h, pad_w)
+    return img[pad_h:shape[0]+pad_h, pad_w:shape[1]+pad_w]
+
 # def is_confused_or_wrong(p,l,wrong_th=0.65):
 #     for i in range(len(p)):
 #         if ((abs(l[i].item() - p[i].item()) > wrong_th) or (p[i].item() >= 0.4 and p[i].item() <= 0.6)):

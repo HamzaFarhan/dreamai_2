@@ -259,11 +259,14 @@ class dai_image_dataset(Dataset):
     def __getitem__(self, index):
         img_path = os.path.join(self.data_dir,self.data.iloc[index, 0])
         img = utils.bgr2rgb(cv2.imread(str(img_path)))
-        try:
-            img_path_2 = os.path.join(self.data_dir,self.data.iloc[index, 1])
-            target = utils.bgr2rgb(cv2.imread(str(img_path_2)))
-        except:
-            target = utils.bgr2rgb(cv2.imread(str(img_path)))
+        img_path_2 = os.path.join(self.data_dir,self.data.iloc[index, 1])
+        target = utils.bgr2rgb(cv2.imread(str(img_path_2)))
+        # try:
+        #     img_path_2 = os.path.join(self.data_dir,self.data.iloc[index, 1])
+        #     target = utils.bgr2rgb(cv2.imread(str(img_path_2)))
+        # except:
+        #     print('nooo')
+        #     target = utils.bgr2rgb(cv2.imread(str(img_path)))
         if self.input_transforms:
             img = self.input_transforms(image=img)['image']
         if self.target_transforms:

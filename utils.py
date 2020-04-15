@@ -1,6 +1,5 @@
 from dreamai import pyflow
 from dreamai.dai_imports import*
-from dreamai.util_classes import*
 from dreamai.data_processing import get_img_stats
 
 def display_img_actual_size(im_data,title = ''):
@@ -66,6 +65,9 @@ def img_float_to_int(img):
 def img_int_to_float(img):
     return np.clip((np.array(img)/255).astype(np.float),0.,1.)
 
+def rgb_read(img):
+    return bgr2rgb(cv2.imread(img))
+
 def adjust_lightness(color, amount=1.2):
     color = img_int_to_float(color)
     c = colorsys.rgb_to_hls(*color)
@@ -75,6 +77,10 @@ def adjust_lightness(color, amount=1.2):
 def albu_resize(img, h, w, interpolation=1):
     rz = albu.Resize(h, w, interpolation)
     return rz(image=img)['image']
+
+def albu_center_crop(img, h, w):
+    cc = albu.CenterCrop(h, w)
+    return cc(image=img)['image']
 
 def plot_in_row(imgs,figsize = (20,20),rows = None,columns = None,titles = [],fig_path = 'fig.png',cmap = None):
     fig=plt.figure(figsize=figsize)
@@ -104,6 +110,12 @@ def denorm_tensor(x,img_mean,img_std):
     x[:, 2, :, :] = x[:, 2, :, :] * img_std[2] + img_mean[2]
     return x
 
+def next_batch(dl):
+    return next(iter(dl))
+
+def filter_modules(net, module):
+    return ([(i,n) for i,n in enumerate(list(net.children())) if isinstance(n, module)])
+
 def tensor_to_img(t):
     if t.dim() > 3:
         return [np.transpose(t_,(1,2,0)) for t_ in t]
@@ -116,6 +128,16 @@ def smooth_labels(labels,eps=0.1):
         length = len(labels)
     labels = labels * (1 - eps) + (1-labels) * eps / (length - 1)
     return labels
+
+def split_df(train_df, test_size=0.15):
+    try:    
+        train_df,val_df = train_test_split(train_df, test_size=test_size, random_state=2, stratify=train_df.iloc[:,1])
+    except:
+        print('Not stratified.')
+        train_df,val_df = train_test_split(train_df, test_size=test_size, random_state=2)
+    train_df = train_df.reset_index(drop=True)
+    val_df = val_df.reset_index(drop=True)
+    return train_df,val_df  
 
 def get_flow(im1, im2):
 
@@ -145,6 +167,13 @@ def to_tensor(x):
     if type(x) == list:
         return [t(image=i)['image'] for i in x]
     return t(image=x)['image']
+
+def instant_tfms(w=224,h=224, img_mean=None, img_std=None):
+    normalize = None
+    if img_mean is not None:
+        normalize = albu.Normalize(img_mean, img_std)
+    tfms = albu.Compose([albu.Resize(h, w), normalize, AT.ToTensor()])
+    return tfms
 
 def imgs_to_batch(paths = [], imgs = [], bs = 1, size = None, norm = False, img_mean = None, img_std = None,
                   stats_percentage = 1., channels = 3, num_workers = 6):
@@ -514,13 +543,33 @@ def show_landmarks(image, landmarks):
     plt.pause(0.001)  # pause a bit so that plots are updated
     plt.show()
 
-def path_list(path,sort = False):
+def path_list(path, sort=False, suffix=None):
     if sort:
-        return sorted(list(Path(path).iterdir()))
-    return list(Path(path).iterdir())
+        if suffix is None:
+            return sorted(list(Path(path).iterdir()))
+        return sorted([p for p in list(Path(path).iterdir()) if p.suffix==suffix])
+    if suffix is None:
+        return list(Path(path).iterdir())
+    return [p for p in list(Path(path).iterdir()) if p.suffix==suffix]
 
-def sorted_paths(path,reverse = True):
-    return sorted(path_list(path),key = lambda x: x.stat().st_ctime, reverse=reverse)
+def folders_with_files(p, sort_key=None, suffix=None):
+    if sort_key is None:
+        folders = sorted_paths(p, reverse=False)
+    else:
+        folders = sorted_paths(p, key=sort_key, reverse=False)
+    folders_dict = dict()
+    for f in folders:
+        if sort_key is None:
+            folders_dict[f.name] = [p.name for p in sorted_paths(f, reverse=False)]
+        else:
+            folders_dict[f.name] = [p.name for p in sorted_paths(f, key=sort_key, reverse=False)]
+    return folders_dict
+
+def sorted_paths(path, key=None, reverse=True):
+    if key is None:
+        return sorted(path_list(path), key=lambda x: x.stat().st_ctime, reverse=reverse)
+    else:
+        return sorted(path_list(path), key=key, reverse=reverse)
 
 def end_of_path(p, n=2):
     parts = p.parts
@@ -562,113 +611,80 @@ def remove_pad(img, shape=(256,256)):
     print(pad_h, pad_w)
     return img[pad_h:shape[0]+pad_h, pad_w:shape[1]+pad_w]
 
-# def is_confused_or_wrong(p,l,wrong_th=0.65):
-#     for i in range(len(p)):
-#         if ((abs(l[i].item() - p[i].item()) > wrong_th) or (p[i].item() >= 0.4 and p[i].item() <= 0.6)):
-#             return True
-#     return False
+class imgs_to_batch_dataset(Dataset):
+    
+    def __init__(self, data, transforms_ = None, channels = 3):
+        super(imgs_to_batch_dataset, self).__init__()
+        self.data = data
+        self.transforms_ = transforms_
+        self.tfms = None
+        self.channels = channels
+        assert transforms_ is not None, print('Please pass some transforms.')
+        
+    def __len__(self):
+        return len(self.data)
+    
+    def __getitem__(self, index):
+        try:
+            img_path = self.data.iloc[index, 0]
+            if self.channels == 3:
+                img = bgr2rgb(cv2.imread(str(img_path)))
+            else:    
+                img = cv2.imread(str(img_path),0)
+        except:
+            img_path = ''
+            img = np.array(self.data.iloc[index, 0])
+        self.tfms = albu.Compose(self.transforms_)
+        x = self.tfms(image=img)['image']
+        if self.channels == 1:
+            x = x.unsqueeze(0)
+        x = x.unsqueeze(0)
+        return x,img_path
+    
+class WeightedMultilabel(nn.Module):
+    def __init__(self, weights):
+        super(WeightedMultilabel,self).__init__()
+        self.loss = nn.BCEWithLogitsLoss()
+        self.weights = weights.unsqueeze(0)
 
-# def get_confused_or_wrong_names(preds,labels,names,wrong_th=0.65):
-#     retrain = []
-#     for i,p in enumerate(preds):
-#         label,name = labels[i],names[i]
-#         if is_confused_or_wrong(p,label,wrong_th):
-#             retrain.append(name)
-#     return retrain
+    def forward(self,outputs, targets):
+        loss = torch.sum(self.loss(outputs, targets) * self.weights) 
+        return loss
 
-# def is_confused(p):
-#     for x in p:
-#         if (x.item() >= 0.4 and x.item() <= 0.6):
-#             return True
-#     return False
+class MultiConcatHeader(nn.Module):
+    def __init__(self,fc1,fc2):
+        super(MultiConcatHeader, self).__init__()
+        self.fc1 = fc1
+        self.fc2 = fc2
+    def forward(self,x):
+        single_label = self.fc1(x)
+        single_index = torch.argmax(torch.softmax(single_label,1),dim=1).float().unsqueeze(1)
+        # print(flatten_tensor(x).shape,single_index.shape)
+        multi_input = torch.cat((flatten_tensor(x),single_index),dim=1)
+        multi_label = self.fc2(multi_input)
+        return single_label,multi_label
 
-# def is_wrong(p,l,wrong_th=0.65):
-#     for x,y in zip(l,p):
-#         if (abs(x.item() - y.item()) > wrong_th):
-#             return True
-#     return False
+class MultiSeparateHeader(nn.Module):
+    def __init__(self,fc1,fc2):
+        super(MultiSeparateHeader, self).__init__()
+        self.fc1 = fc1
+        self.fc2 = fc2
+    def forward(self,x):
+        single_label = self.fc1(x)
+        multi_label = self.fc2(x)
+        return single_label,multi_label
 
-# def get_wrong(preds,labels,names,wrong_th=0.65):
-#     retrain = []
-#     for i,p in enumerate(preds):
-#         label,name = labels[i],names[i]
-#         if is_wrong(p,label,wrong_th):
-#             retrain.append(name)
-#     return retrain
+class Printer(nn.Module):
+    def forward(self,x):
+        print(x.size())
+        return x
 
-# def get_confused(preds,labels,names):
-#     retrain = []
-#     for p,name in zip(preds,names):
-#         if is_confused(p):
-#             retrain.append(name)
-#     return retrain
+class Flatten(nn.Module):
+    def forward(self, input):
+        return input.view(input.size(0), -1)
 
-# def get_random_retrain(retrain,names):
-#     for n in names:
-#         if random.random() > 0.1 and n not in retrain:
-#             retrain.append(n)
-#     return retrain
-
-# def get_retrain(model,loader,wrong_th=0.65):
-#     retrain = []
-#     for batch in loader:
-#         preds,labels,names = torch.sigmoid(model.predict(batch[0])),batch[1],batch[2]
-#         retrain += get_random_retrain(get_confused_or_wrong_names(preds,labels,names,wrong_th),names)
-#     return retrain
-
-# def get_wrong_class(preds,labels,names,class_idx,wrong_th=0.75):
-#     retrain = []
-#     for i,pred in enumerate(preds):
-#         label,name = labels[i],names[i]
-#         if ((label[class_idx].item() - pred[class_idx].item()) > wrong_th):
-#             retrain.append(name)
-#     return retrain
-
-# def get_retrain_wrong_class(model,loader,class_idx,wrong_th=0.75):
-#     retrain = []
-#     for batch in loader:
-#         preds,labels,names = torch.sigmoid(model.predict(batch[0])),batch[1],batch[2]
-#         retrain += get_wrong_class(preds,labels,names,class_idx,wrong_th)
-#     return retrain
-
-# def get_confused_class(preds,names,class_idx):
-#     retrain = []
-#     for name,pred in zip(names,preds):
-#         if pred[class_idx].item() >= 0.4 and pred[class_idx].item() <= 0.6:
-#             retrain.append(name)
-#     return retrain
-
-# def get_retrain_confused_class(model,loader,class_idx):
-#     retrain = []
-#     for batch in loader:
-#         preds,names = torch.sigmoid(model.predict(batch[0])),batch[2]
-#         retrain += get_confused_class(preds,names,class_idx)
-#     return retrain
-
-# def get_all_zeros(preds,names):
-#     retrain = []
-#     for name,pred in zip(names,preds):
-#         if sum(pred).item() == 0:
-#             retrain.append(name)
-#     return retrain
-
-# def get_retrain_all_zeros(model,loader):
-#     retrain = []
-#     for batch in loader:
-#         preds,names = torch.sigmoid(model.predict(batch[0])),batch[2]
-#         retrain += get_all_zeros(preds,names)
-#     return retrain
-
-# def get_class(labels,names,class_idx):
-#     retrain = []
-#     for label,name in zip(labels,names):
-#         if label[class_idx] == 1:
-#             retrain.append(name)
-#     return retrain
-
-# def get_retrain_class(loader,class_idx):
-#     retrain = []
-#     for batch in loader:
-#         labels,names = batch[1],batch[2]
-#         retrain += get_class(labels,names,class_idx)
-#     return retrain
+class SaveFeatures():
+    features=None
+    def __init__(self, m): self.hook = m.register_forward_hook(self.hook_fn)
+    def hook_fn(self, module, input, output): self.features = output
+    def remove(self): self.hook.remove()

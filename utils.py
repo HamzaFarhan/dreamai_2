@@ -2,6 +2,14 @@ from dreamai import pyflow
 from dreamai.dai_imports import*
 from dreamai.data_processing import get_img_stats
 
+def save_obj(path, obj):
+    with open(path, 'wb') as f:
+        pickle.dump(obj, f, pickle.HIGHEST_PROTOCOL)
+
+def load_obj(path):
+    with open(path, 'rb') as f:
+        return pickle.load(f)
+
 def display_img_actual_size(im_data,title = ''):
     dpi = 80
     height, width, depth = im_data.shape
@@ -14,6 +22,8 @@ def display_img_actual_size(im_data,title = ''):
     plt.show()
 
 def plt_show(im,cmap=None):
+    if isinstance(im, torch.Tensor):
+        im = tensor_to_img(im)
     plt.imshow(im,cmap=cmap)
     plt.show()
 
@@ -168,11 +178,13 @@ def to_tensor(x):
         return [t(image=i)['image'] for i in x]
     return t(image=x)['image']
 
-def instant_tfms(w=224,h=224, img_mean=None, img_std=None):
-    normalize = None
+def instant_tfms(h=224,w=224, tensorfy=True, img_mean=None, img_std=None):
+    normalize,t  = None, None
     if img_mean is not None:
         normalize = albu.Normalize(img_mean, img_std)
-    tfms = albu.Compose([albu.Resize(h, w), normalize, AT.ToTensor()])
+    if tensorfy:
+        t = AT.ToTensor()
+    tfms = albu.Compose([albu.Resize(h, w), normalize, t])
     return tfms
 
 def imgs_to_batch(paths = [], imgs = [], bs = 1, size = None, norm = False, img_mean = None, img_std = None,
@@ -543,33 +555,73 @@ def show_landmarks(image, landmarks):
     plt.pause(0.001)  # pause a bit so that plots are updated
     plt.show()
 
-def path_list(path, sort=False, suffix=None):
-    if sort:
-        if suffix is None:
-            return sorted(list(Path(path).iterdir()))
-        return sorted([p for p in list(Path(path).iterdir()) if p.suffix==suffix])
-    if suffix is None:
-        return list(Path(path).iterdir())
-    return [p for p in list(Path(path).iterdir()) if p.suffix==suffix]
+def idty(x):
+    return x
 
-def folders_with_files(p, sort_key=None, suffix=None):
-    if sort_key is None:
-        folders = sorted_paths(p, reverse=False)
+def path_list(path, suffix=None, make_str=False, map_fn=idty):
+    # if sort:
+    #     if suffix is None:
+    #         l = sorted(list(Path(path).iterdir()))
+    #         # return sorted(list(Path(path).iterdir()))
+    #     else:
+    #         l = sorted([p for p in list(Path(path).iterdir()) if p.suffix==suffix])
+    #     # return sorted([p for p in list(Path(path).iterdir()) if p.suffix==suffix])
+    # else:
+    if suffix is None:
+        l = list(Path(path).iterdir())
+        # return list(Path(path).iterdir())
     else:
-        folders = sorted_paths(p, key=sort_key, reverse=False)
+        l = [p for p in list(Path(path).iterdir()) if p.suffix==suffix]    
+    l = [map_fn(p) for p in l]
+    if make_str:
+        l = [str(p) for p in l]
+    return l
+
+def sorted_paths(path, key=None, reverse=False, suffix=None, make_str=False, map_fn=idty):
+    if key is None and not make_str:
+        return sorted(path_list(path, suffix=suffix, make_str=make_str, map_fn=map_fn), key=lambda x: x.stat().st_ctime, reverse=True)
+    else:
+        return sorted(path_list(path, suffix=suffix, make_str=make_str, map_fn=map_fn), key=key, reverse=reverse)
+
+def folders_with_files(p, full_path=False, folder_sort_key=None, file_sort_key=None, suffix=None, num_files=None,
+                       folder_key=lambda x:x, make_str=False, map_nf=idty):
+    
+    folders = sorted_paths(p, key=folder_sort_key, reverse=False)
     folders_dict = dict()
     for f in folders:
-        if sort_key is None:
-            folders_dict[f.name] = [p.name for p in sorted_paths(f, reverse=False)]
+        if full_path:
+            folders_dict[folder_key(f.name)] = sorted_paths(f, key=file_sort_key, suffix=suffix,
+                                                            make_str=make_str, reverse=False, map_fn=map_fn)[:num_files]
         else:
-            folders_dict[f.name] = [p.name for p in sorted_paths(f, key=sort_key, reverse=False)]
+            folders_dict[folder_key(f.name)] = sorted_paths(f, key=file_sort_key, suffix=suffix, reverse=False,
+                                                            map_fn=lambda x:x.name)[:num_files]
     return folders_dict
 
-def sorted_paths(path, key=None, reverse=True):
-    if key is None:
-        return sorted(path_list(path), key=lambda x: x.stat().st_ctime, reverse=reverse)
-    else:
-        return sorted(path_list(path), key=key, reverse=reverse)
+# def folders_with_files(p, full_path=False, sort_key=None, suffix=None, num_files=None, folder_key=lambda x:x, make_str=False):
+
+#     # if sort_key is None:
+#     #     folders = sorted_paths(p, reverse=False)
+#     # else:
+#     #     folders = sorted_paths(p, key=sort_key, reverse=False)
+#     folders = sorted_paths(p, key=sort_key, reverse=False)
+
+#     folders_dict = dict()
+#     for f in folders:
+#          if full_path:
+#                 folders_dict[folder_key(f.name)] = [str(p) for p in sorted_paths(f, key=sort_key, reverse=False)][:num_files]
+#             else:
+#                 folders_dict[folder_key(f.name)] = [p.name for p in sorted_paths(f, key=sort_key, reverse=False)][:num_files]
+#         # if sort_key is None:
+#         #     if full_path:
+#         #         folders_dict[folder_key(f.name)] = [str(p) for p in sorted_paths(f, reverse=False)][:num_files]
+#         #     else:
+#         #         folders_dict[folder_key(f.name)] = [p.name for p in sorted_paths(f, reverse=False)][:num_files]
+#         # else:
+#         #     if full_path:
+#         #         folders_dict[folder_key(f.name)] = [str(p) for p in sorted_paths(f, key=sort_key, reverse=False)][:num_files]    
+#         #     else:
+#         #         folders_dict[folder_key(f.name)] = [p.name for p in sorted_paths(f, key=sort_key, reverse=False)][:num_files]
+#     return folders_dict
 
 def end_of_path(p, n=2):
     parts = p.parts

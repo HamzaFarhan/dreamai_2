@@ -45,6 +45,7 @@ from ast import literal_eval
 import albumentations as albu
 from datetime import datetime
 from matplotlib import colors
+import moviepy.editor as editor
 from collections import Counter
 import matplotlib.pyplot as plt
 from pprint import PrettyPrinter

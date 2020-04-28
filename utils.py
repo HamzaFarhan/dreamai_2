@@ -172,6 +172,9 @@ def get_flow(im1, im2):
     #flow = rescale_flow(flow,0,1)
     return flow
 
+def swap_state_dict_key(d, x, y):
+    return OrderedDict([(k.replace(x, y), v) if x in k else (k, v) for k, v in d.items()])
+
 def to_tensor(x):
     t = AT.ToTensorV2()
     if type(x) == list:
@@ -320,6 +323,22 @@ def cnn_stride(w,o,k,p):
 
 def cnn_padding(w,o,k,s):
     return np.floor((((o*s)-s)-w+k)/2 )
+
+def pad_list(x, n):
+    y = x
+    if isinstance(y[0], list):
+        y+=list_map(list(np.tile(y[-1], (n,1))), list)
+    else:
+        y+=list(np.tile(y[-1], (n)))
+    # elif isinstance(y[0], Path):
+        # y+=list_map(list(np.tile(y[-1], (n,1))), Path)
+    return y
+
+def items_to_idx(l1, l2):
+    ret = []
+    for i in l1:
+        ret.append(l2.index(i))
+    return ret
 
 DAI_AvgPool = nn.AdaptiveAvgPool2d(1)
 
@@ -583,6 +602,9 @@ def show_landmarks(image, landmarks):
     plt.scatter(landmarks[:, 0], landmarks[:, 1], s=10, marker='.', c='r')
     plt.pause(0.001)  # pause a bit so that plots are updated
     plt.show()
+
+def chunkify(l, chunk_size):
+    return [l[i:i+chunk_size] for i in range(0,len(l), chunk_size)]
 
 def idty(x):
     return x

@@ -409,6 +409,23 @@ class dai_super_res_video_inference(Dataset):
 #         neighbours = [utils.to_tensor(n).unsqueeze(0) for n in neighbours]
 #         flow = [utils.to_tensor(f).unsqueeze(0) for f in flow]
 
+class dai_video_dataset(Dataset):
+    def __init__(self, data, tfms):
+        self.data = data
+        self.tfms = tfms
+        
+    def __getitem__(self, index):
+        
+        chunk = (self.data.iloc[index, 0].split())
+        label = (literal_eval(self.data.iloc[index, 1]))
+        for i,c in enumerate(chunk):
+            img = Image.open(c)
+            chunk[i] = self.tfms(img)
+        chunk = torch.stack(chunk, 0).permute(1, 0, 2, 3)
+        return chunk, label
+    
+    def __len__(self): return len(self.data)
+
 def rescale_landmarks(landmarks,row_scale,col_scale):
     landmarks2 = copy.deepcopy(torch.Tensor(landmarks).reshape((-1,2)))
     for lm in landmarks2:

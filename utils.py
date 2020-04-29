@@ -143,7 +143,7 @@ def split_df(train_df, test_size=0.15):
     try:    
         train_df,val_df = train_test_split(train_df, test_size=test_size, random_state=2, stratify=train_df.iloc[:,1])
     except:
-        print('Not stratified.')
+        print('Not stratified')
         train_df,val_df = train_test_split(train_df, test_size=test_size, random_state=2)
     train_df = train_df.reset_index(drop=True)
     val_df = val_df.reset_index(drop=True)

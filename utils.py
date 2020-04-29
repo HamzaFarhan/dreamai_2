@@ -172,6 +172,9 @@ def get_flow(im1, im2):
     #flow = rescale_flow(flow,0,1)
     return flow
 
+def swap_state_dict_key(d, x, y):
+    return OrderedDict([(k.replace(x, y), v) if x in k else (k, v) for k, v in d.items()])
+
 def to_tensor(x):
     t = AT.ToTensorV2()
     if type(x) == list:
@@ -321,6 +324,22 @@ def cnn_stride(w,o,k,p):
 def cnn_padding(w,o,k,s):
     return np.floor((((o*s)-s)-w+k)/2 )
 
+def pad_list(x, n):
+    y = x
+    if isinstance(y[0], list):
+        y+=list_map(list(np.tile(y[-1], (n,1))), list)
+    else:
+        y+=list(np.tile(y[-1], (n)))
+    # elif isinstance(y[0], Path):
+        # y+=list_map(list(np.tile(y[-1], (n,1))), Path)
+    return y
+
+def items_to_idx(l1, l2):
+    ret = []
+    for i in l1:
+        ret.append(l2.index(i))
+    return ret
+
 DAI_AvgPool = nn.AdaptiveAvgPool2d(1)
 
 def flatten_tensor(x):
@@ -459,6 +478,30 @@ def split_video(video_path, start=0, stop=None, output_path='split_video.mp4', f
     out.release()
     vs.release()
 
+def vid_to_frames(v, dest_folder='', name='frame%05d.jpg', fps=30):
+    os.makedirs(dest_folder, exist_ok=True)
+    vp = Path(dest_folder)
+    if isinstance(v, str) or isinstance(v, Path):
+        vid = editor.VideoFileClip(str(v))
+    else:
+        vid = v
+    imgs = vid.write_images_sequence(str(vp/name), fps=fps)
+    return imgs
+
+def vid_folders_to_frames(video_dict, video_path='videos', frame_path='frames',
+                          frame_name='frame%05d.jpg', fps=30):
+    
+    folders, vids = list(video_dict.keys()), list(video_dict.values())
+    for i,f in enumerate(folders):
+        fp = Path(frame_path)/f
+        os.makedirs(fp, exist_ok=True)
+        for v in vids[i]:
+            vp = fp/v[:-4]
+            os.makedirs(vp, exist_ok=True)
+            imgs = vid_to_frames(str(video_path/f/v), dest_folder=vp, name=frame_name, fps=fps)
+    #         vid = editor.VideoFileClip(str(video_path/f/v))
+    #         imgs = vid.write_images_sequence(str(vp/'frame%05d.jpg'), fps=10)
+
 def add_text(img, text, x_factor=2, y_factor=2, font=cv2.FONT_HERSHEY_SIMPLEX, scale=5.,
                 color='white', thickness=10):
     color = color_to_rgb(color)
@@ -474,7 +517,12 @@ def add_text_pil(img, text=['DreamAI'], x=None, y=None, font='verdana', font_siz
     if type(text) == str:
         text = [text]
     x_,y_ = x,y
-    img = Image.fromarray(img)
+    if isinstance(img, str):
+        img = Image.open(img)
+    elif isinstance(img, Path):
+        img = Image.open(str(img))
+    elif isinstance(img, np.ndarray):
+        img = Image.fromarray(img)
     for i,txt in enumerate(text):
         if font_size is None:
             font_size = img.size[1]
@@ -555,8 +603,20 @@ def show_landmarks(image, landmarks):
     plt.pause(0.001)  # pause a bit so that plots are updated
     plt.show()
 
+def chunkify(l, chunk_size):
+    return [l[i:i+chunk_size] for i in range(0,len(l), chunk_size)]
+
 def idty(x):
     return x
+
+def last_modified(x):
+    return x.stat().st_ctime
+
+def list_map(l, m):
+    return [m(x) for x in l]
+
+def p_list(path):
+    return list(Path(path).iterdir())
 
 def path_list(path, suffix=None, make_str=False, map_fn=idty):
     # if sort:
@@ -568,32 +628,41 @@ def path_list(path, suffix=None, make_str=False, map_fn=idty):
     #     # return sorted([p for p in list(Path(path).iterdir()) if p.suffix==suffix])
     # else:
     if suffix is None:
-        l = list(Path(path).iterdir())
+        l = p_list(path)
         # return list(Path(path).iterdir())
     else:
-        l = [p for p in list(Path(path).iterdir()) if p.suffix==suffix]    
-    l = [map_fn(p) for p in l]
+        l = [p for p in list(Path(path).iterdir()) if p.suffix==suffix]
+    l = list_map(l, map_fn) 
     if make_str:
-        l = [str(p) for p in l]
+        l = list_map(l, str)
     return l
 
-def sorted_paths(path, key=None, reverse=False, suffix=None, make_str=False, map_fn=idty):
-    if key is None and not make_str:
-        return sorted(path_list(path, suffix=suffix, make_str=make_str, map_fn=map_fn), key=lambda x: x.stat().st_ctime, reverse=True)
+def sorted_paths(path, key=None, suffix=None, make_str=False, map_fn=idty, reverse=False):
+
+    if suffix is None:
+        l = p_list(path)
     else:
-        return sorted(path_list(path, suffix=suffix, make_str=make_str, map_fn=map_fn), key=key, reverse=reverse)
+        l = [p for p in p_list(path) if p.suffix==suffix]
+    if key is None:
+        l = sorted(l, key=last_modified, reverse=True)
+    else:
+        l = sorted(l, key=key, reverse=reverse)
+    l = list_map(l, map_fn)
+    if make_str:
+        l = list_map(l, str)
+    return l
 
 def folders_with_files(p, full_path=False, folder_sort_key=None, file_sort_key=None, suffix=None, num_files=None,
-                       folder_key=lambda x:x, make_str=False, map_nf=idty):
+                       folder_key=lambda x:x, make_str=False, map_fn=idty, reverse=False):
     
-    folders = sorted_paths(p, key=folder_sort_key, reverse=False)
+    folders = sorted_paths(p, key=folder_sort_key, reverse=reverse)
     folders_dict = dict()
     for f in folders:
         if full_path:
             folders_dict[folder_key(f.name)] = sorted_paths(f, key=file_sort_key, suffix=suffix,
-                                                            make_str=make_str, reverse=False, map_fn=map_fn)[:num_files]
+                                                            make_str=make_str, reverse=reverse, map_fn=map_fn)[:num_files]
         else:
-            folders_dict[folder_key(f.name)] = sorted_paths(f, key=file_sort_key, suffix=suffix, reverse=False,
+            folders_dict[folder_key(f.name)] = sorted_paths(f, key=file_sort_key, suffix=suffix, reverse=reverse,
                                                             map_fn=lambda x:x.name)[:num_files]
     return folders_dict
 

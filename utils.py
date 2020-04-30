@@ -143,7 +143,7 @@ def split_df(train_df, test_size=0.15):
     try:    
         train_df,val_df = train_test_split(train_df, test_size=test_size, random_state=2, stratify=train_df.iloc[:,1])
     except:
-        print('Not stratified')
+        print('Not stratified.')
         train_df,val_df = train_test_split(train_df, test_size=test_size, random_state=2)
     train_df = train_df.reset_index(drop=True)
     val_df = val_df.reset_index(drop=True)
@@ -487,6 +487,13 @@ def vid_to_frames(v, dest_folder='', name='frame%05d.jpg', fps=30):
         vid = v
     imgs = vid.write_images_sequence(str(vp/name), fps=fps)
     return imgs
+
+def extract_frames(v, fps=30):
+    if isinstance(v, str) or isinstance(v, Path):
+        vid = editor.VideoFileClip(str(v))
+    else:
+        vid = v
+    return list(vid.iter_frames(fps))
 
 def vid_folders_to_frames(video_dict, video_path='videos', frame_path='frames',
                           frame_name='frame%05d.jpg', fps=30):

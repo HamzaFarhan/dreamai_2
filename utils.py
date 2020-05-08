@@ -10,7 +10,7 @@ def load_obj(path):
     with open(path, 'rb') as f:
         return pickle.load(f)
 
-def display_img_actual_size(im_data,title = ''):
+def display_img_actual_size(im_data, title=''):
     dpi = 80
     height, width, depth = im_data.shape
     figsize = width / float(dpi), height / float(dpi)
@@ -21,19 +21,19 @@ def display_img_actual_size(im_data,title = ''):
     plt.title(title,fontdict={'fontsize':25})
     plt.show()
 
-def plt_show(im,cmap=None):
+def plt_show(im, cmap=None):
     if isinstance(im, torch.Tensor):
         im = tensor_to_img(im)
-    plt.imshow(im,cmap=cmap)
+    plt.imshow(im, cmap=cmap)
     plt.show()
 
-def plt_load(path,show = False, cmap = None):
+def plt_load(path, show=False, cmap=None):
     img = plt.imread(path)
     if show:
-        plt_show(img,cmap=cmap)
+        plt_show(img, cmap=cmap)
     return img    
 
-def denorm_img_general(inp,mean=None,std=None):
+def denorm_img_general(inp, mean=None, std=None):
     inp = inp.numpy()
     inp = inp.transpose((1, 2, 0))
     if mean is None:
@@ -139,6 +139,9 @@ def smooth_labels(labels,eps=0.1):
     labels = labels * (1 - eps) + (1-labels) * eps / (length - 1)
     return labels
 
+def df_classes(df):
+    return np.unique(flatten_list([x.split() for x in list(df.iloc[:,1])]))
+
 def split_df(train_df, test_size=0.15):
     try:    
         train_df,val_df = train_test_split(train_df, test_size=test_size, random_state=2, stratify=train_df.iloc[:,1])
@@ -174,6 +177,9 @@ def get_flow(im1, im2):
 
 def swap_state_dict_key(d, x, y):
     return OrderedDict([(k.replace(x, y), v) if x in k else (k, v) for k, v in d.items()])
+
+def swap_state_dict_key_first(sd, x, y):
+    return OrderedDict([(y+k[1:], v) if k[0]==x else (k, v) for k, v in sd.items()])
 
 def to_tensor(x):
     t = AT.ToTensorV2()
@@ -644,12 +650,16 @@ def path_list(path, suffix=None, make_str=False, map_fn=idty):
         l = list_map(l, str)
     return l
 
-def sorted_paths(path, key=None, suffix=None, make_str=False, map_fn=idty, reverse=False):
+def sorted_paths(path, key=None, suffix=None, make_str=False, map_fn=idty, reverse=False, only_dirs=False):
 
     if suffix is None:
         l = p_list(path)
     else:
-        l = [p for p in p_list(path) if p.suffix==suffix]
+        if isinstance(suffix, str):
+            suffix = (suffix)
+        l = [p for p in p_list(path) if p.suffix in suffix]
+    if only_dirs:
+        l = [x for x in l if x.is_dir()]
     if key is None:
         l = sorted(l, key=last_modified, reverse=True)
     else:
@@ -662,9 +672,10 @@ def sorted_paths(path, key=None, suffix=None, make_str=False, map_fn=idty, rever
 def folders_with_files(p, full_path=False, folder_sort_key=None, file_sort_key=None, suffix=None, num_files=None,
                        folder_key=lambda x:x, make_str=False, map_fn=idty, reverse=False):
     
-    folders = sorted_paths(p, key=folder_sort_key, reverse=reverse)
+    folders = sorted_paths(p, key=folder_sort_key, reverse=reverse, only_dirs=True)
     folders_dict = dict()
     for f in folders:
+        # if f.is_dir():
         if full_path:
             folders_dict[folder_key(f.name)] = sorted_paths(f, key=file_sort_key, suffix=suffix,
                                                             make_str=make_str, reverse=reverse, map_fn=map_fn)[:num_files]

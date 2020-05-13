@@ -142,15 +142,24 @@ def smooth_labels(labels,eps=0.1):
 def df_classes(df):
     return np.unique(flatten_list([x.split() for x in list(df.iloc[:,1])]))
 
-def split_df(train_df, test_size=0.15):
+def split_df(train_df, test_size=0.15, stratify_idx=1):
     try:    
-        train_df,val_df = train_test_split(train_df, test_size=test_size, random_state=2, stratify=train_df.iloc[:,1])
+        train_df,val_df = train_test_split(train_df, test_size=test_size, random_state=2, stratify=train_df.iloc[:,stratify_idx])
     except:
         print('Not stratified.')
         train_df,val_df = train_test_split(train_df, test_size=test_size, random_state=2)
     train_df = train_df.reset_index(drop=True)
     val_df = val_df.reset_index(drop=True)
     return train_df,val_df  
+
+def one_hot(targets, multi=False):
+    if multi:
+        binerizer = MultiLabelBinarizer()
+        dai_1hot = binerizer.fit_transform(targets)
+    else:
+        binerizer = LabelBinarizer()
+        dai_1hot = binerizer.fit_transform(targets)
+    return dai_1hot, binerizer.classes_
 
 def get_flow(im1, im2):
 
@@ -181,6 +190,12 @@ def swap_state_dict_key(d, x, y):
 def swap_state_dict_key_first(sd, x, y):
     return OrderedDict([(y+k[1:], v) if k[0]==x else (k, v) for k, v in sd.items()])
 
+def remove_key(d, x):
+    keys = list(d.keys())
+    for k in keys:
+        if x in k:
+            del d[k]
+
 def to_tensor(x):
     t = AT.ToTensorV2()
     if type(x) == list:
@@ -195,6 +210,18 @@ def instant_tfms(h=224,w=224, tensorfy=True, img_mean=None, img_std=None):
         t = AT.ToTensor()
     tfms = albu.Compose([albu.Resize(h, w), normalize, t])
     return tfms
+
+def dai_tfms(h=224,w=224, tensorfy=True, img_mean=None, img_std=None):
+    t1 = [albu.HorizontalFlip(), albu.Rotate(10.), albu.ShiftScaleRotate(0,0.15,0),
+          albu.RandomBrightnessContrast(0.1, 0.1), albu.ShiftScaleRotate(0.03,0,0)]
+    t2 = list(instant_tfms(h, w, tensorfy, img_mean, img_std))
+    return albu.Compose(t1+t2)
+
+def apply_tfms(img, tfms):
+    try:
+        img = tfms(img)
+    except:
+        img = tfms(image=img)['image']
 
 def imgs_to_batch(paths = [], imgs = [], bs = 1, size = None, norm = False, img_mean = None, img_std = None,
                   stats_percentage = 1., channels = 3, num_workers = 6):

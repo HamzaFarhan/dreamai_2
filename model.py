@@ -57,7 +57,7 @@ class Classifier():
         except:
             class_accuracies = [(self.class_names[i],100.0*(self.class_correct[i]/self.class_totals[i])) 
                                  for i in range(len(self.class_names)) if self.class_totals[i] > 0]
-        return accuracy,class_accuracies
+        return accuracy, class_accuracies
 
 # class MultiLabelClassifier():
 #     def __init__(self,class_names):

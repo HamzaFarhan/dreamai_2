@@ -476,7 +476,7 @@ def add_extension(a,e):
     a = [x+e for x in a]
     return a
 
-def one_hot(targets, multi = False):
+def one_hot(targets, multi=False):
     if multi:
         binerizer = MultiLabelBinarizer()
         dai_1hot = binerizer.fit_transform(targets)

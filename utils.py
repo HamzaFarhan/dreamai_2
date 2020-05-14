@@ -152,6 +152,9 @@ def split_df(train_df, test_size=0.15, stratify_idx=1):
     val_df = val_df.reset_index(drop=True)
     return train_df,val_df  
 
+def dai_one_hot(labels, class_names):
+    return [list(np.in1d(list(class_names), l)*1.) for l in labels]
+
 def get_one_hot(df):
     labels = list_map(df.iloc[:,1], lambda x:str(x).split())
     is_multi = np.array(list_map(labels, lambda x:len(x)>1)).any()

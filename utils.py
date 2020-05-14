@@ -152,6 +152,14 @@ def split_df(train_df, test_size=0.15, stratify_idx=1):
     val_df = val_df.reset_index(drop=True)
     return train_df,val_df  
 
+def get_one_hot(df):
+    labels = list_map(df.iloc[:,1], lambda x:str(x).split())
+    is_multi = np.array(list_map(labels, lambda x:len(x)>1)).any()
+    if not is_multi:
+        labels = df.iloc[:,1]
+    one_hot_labels, class_names = one_hot(labels, multi=is_multi)
+    return one_hot_labels, class_names, is_multi
+
 def one_hot(targets, multi=False):
     if multi:
         binerizer = MultiLabelBinarizer()

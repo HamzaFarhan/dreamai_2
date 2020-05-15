@@ -18,6 +18,15 @@ class Classifier():
             self.class_correct[label] += correct[i].item()
             self.class_totals[label] += 1
 
+    def fai_update_multi_accuracies(self, preds, label):
+        correct = label*preds
+        class_idx = torch.nonzero(label)[0]
+        for idx in class_idx:
+            c = correct[idx].item()
+            idx = idx.item()
+            self.class_correct[idx] += c
+            self.class_totals[idx] += 1
+
     def update_multi_accuracies(self,outputs,labels,thresh=0.5):
         preds = torch.sigmoid(outputs) > thresh
         correct = (labels==1)*(preds==1)

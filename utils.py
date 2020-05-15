@@ -153,7 +153,7 @@ def split_df(train_df, test_size=0.15, stratify_idx=1):
     return train_df,val_df  
 
 def dai_one_hot(labels, class_names):
-    return [list(np.in1d(list(class_names), l)*1.) for l in labels]
+    return [(np.in1d(list(class_names), l)*1.) for l in labels]
 
 def get_one_hot(df):
     labels = list_map(df.iloc[:,1], lambda x:str(x).split())
@@ -208,7 +208,7 @@ def remove_key(d, x):
             del d[k]
 
 def to_tensor(x):
-    t = AT.ToTensorV2()
+    t = AT.ToTensor()
     if type(x) == list:
         return [t(image=i)['image'] for i in x]
     return t(image=x)['image']

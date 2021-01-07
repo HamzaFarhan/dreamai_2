@@ -52,7 +52,7 @@ jupyter-nbextensions-configurator
 kiwisolver==1.1.0
 git+https://github.com/kornia/kornia
 lazy-object-proxy==1.4.3
-lxml==4.5.0
+lxml==4.6.2
 Mako==1.1.1
 MarkupSafe==1.1.1
 matplotlib==3.1.3
